@@ -1,0 +1,422 @@
+{
+	"Identifier": "FLWF",
+	"Dependencies": [
+		""
+	],
+	"UK English": {
+		"About": {
+			"Name": "Flow Field Pathfinding",
+			"Author": "Flow Field Pathfinding",
+			"Comment": "Top-down pathfinding for many objects at once. Add your walls, then ask which direction an object should move to reach another object. Everything heading for the same spot shares one calculation, so it stays fast with many instances.",
+			"Copyright": "Copyright \u00a9 2026",
+			"Help": "Help/Example.chm",
+			"URL": "https://github.com/willy313/FusionPathfinding"
+		},
+		"ActionMenu": [
+			[
+				"Grid",
+				[
+					0,
+					"Create grid"
+				],
+				[
+					1,
+					"Create grid covering the whole frame"
+				],
+				[
+					2,
+					"Clear all obstacles"
+				]
+			],
+			[
+				"Obstacles",
+				[
+					3,
+					"Add Fusion obstacles (all layers)"
+				],
+				[
+					4,
+					"Add Fusion obstacles on one layer"
+				],
+				[
+					5,
+					"Add objects as obstacles"
+				],
+				[
+					6,
+					"Remove objects from obstacles"
+				]
+			],
+			[
+				"Performance",
+				[
+					7,
+					"Limit work per frame"
+				]
+			]
+		],
+		"ConditionMenu": [
+			[
+				0,
+				"Position is inside an obstacle"
+			]
+		],
+		"ExpressionMenu": [
+			[
+				"Direction",
+				[
+					0,
+					"Direction from object A to object B"
+				],
+				[
+					1,
+					"Direction from position A to position B"
+				]
+			],
+			[
+				"Path",
+				[
+					2,
+					"Path distance between objects"
+				],
+				[
+					3,
+					"Path distance between positions"
+				],
+				[
+					4,
+					"Is there a path between objects?"
+				],
+				[
+					5,
+					"Is there a path between positions?"
+				]
+			],
+			[
+				"Grid info",
+				[
+					6,
+					"Is a position blocked?"
+				],
+				[
+					7,
+					"Grid width in cells"
+				],
+				[
+					8,
+					"Grid height in cells"
+				],
+				[
+					9,
+					"Cell size in pixels"
+				],
+				[
+					10,
+					"Number of blocked cells"
+				],
+				[
+					11,
+					"Number of cached targets"
+				]
+			]
+		],
+		"Actions": [
+			{
+				"Title": "Create grid: %0 x %1 cells, %2 px per cell, top-left corner at (%3, %4)",
+				"Parameters": [
+					[
+						"Integer",
+						"Grid width in cells"
+					],
+					[
+						"Integer",
+						"Grid height in cells"
+					],
+					[
+						"Integer",
+						"Cell size in pixels (smaller = more precise but slower to calculate; 16 is a good start)"
+					],
+					[
+						"Integer",
+						"X of the grid's top-left corner in the frame (usually 0)"
+					],
+					[
+						"Integer",
+						"Y of the grid's top-left corner in the frame (usually 0)"
+					]
+				]
+			},
+			{
+				"Title": "Create grid covering the whole frame, %0 px per cell",
+				"Parameters": [
+					[
+						"Integer",
+						"Cell size in pixels (smaller = more precise but slower to calculate; 16 is a good start)"
+					]
+				]
+			},
+			{
+				"Title": "Clear all obstacles from the grid"
+			},
+			{
+				"Title": "Add Fusion obstacles to the grid (all layers)"
+			},
+			{
+				"Title": "Add Fusion obstacles on layer %0 to the grid",
+				"Parameters": [
+					[
+						"Integer",
+						"Layer number to scan for obstacles"
+					]
+				]
+			},
+			{
+				"Title": "Add %0 to the grid as obstacles",
+				"Parameters": [
+					[
+						"Object",
+						"Objects to turn into obstacles. Their current position and size are used; add them again after they move"
+					]
+				]
+			},
+			{
+				"Title": "Remove %0 from the grid's obstacles",
+				"Parameters": [
+					[
+						"Object",
+						"Objects to remove (only objects that were added with Add as obstacles)"
+					]
+				]
+			},
+			{
+				"Title": "Limit pathfinding work to %0 cells per frame (0 = no limit)",
+				"Parameters": [
+					[
+						"Integer",
+						"Maximum cells processed per frame; 0 = no limit. Raise it if the game stutters when targets move"
+					]
+				]
+			}
+		],
+		"Conditions": [
+			{
+				"Title": "%o : Position (%0, %1) is inside an obstacle",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Integer",
+						"X position in pixels"
+					],
+					[
+						"Integer",
+						"Y position in pixels"
+					]
+				]
+			}
+		],
+		"Expressions": [
+			{
+				"Title": "Direction(",
+				"Returns": "Float",
+				"Parameters": [
+					[
+						"Integer",
+						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+					],
+					[
+						"Integer",
+						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+					],
+					[
+						"Integer",
+						"Direction format: 4, 8, 16 or 32 = Fusion directions (0-31, ready for Set direction); 360 = smooth angle in degrees. When there is no path, or the object has arrived, its own current direction is returned so it keeps its heading"
+					]
+				]
+			},
+			{
+				"Title": "DirectionAt(",
+				"Returns": "Float",
+				"Parameters": [
+					[
+						"Float",
+						"X position of the moving object (A)"
+					],
+					[
+						"Float",
+						"Y position of the moving object (A)"
+					],
+					[
+						"Float",
+						"X position to move toward (B)"
+					],
+					[
+						"Float",
+						"Y position to move toward (B)"
+					],
+					[
+						"Float",
+						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+					],
+					[
+						"Integer",
+						"Direction format: 4, 8, 16 or 32 = Fusion directions (0-31, ready for Set direction); 360 = smooth angle in degrees. The result is -1 when there is no path or the object has arrived"
+					]
+				]
+			},
+			{
+				"Title": "PathDistance(",
+				"Returns": "Float",
+				"Parameters": [
+					[
+						"Integer",
+						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+					],
+					[
+						"Integer",
+						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+					]
+				]
+			},
+			{
+				"Title": "PathDistanceAt(",
+				"Returns": "Float",
+				"Parameters": [
+					[
+						"Float",
+						"X position of A"
+					],
+					[
+						"Float",
+						"Y position of A"
+					],
+					[
+						"Float",
+						"X position of B"
+					],
+					[
+						"Float",
+						"Y position of B"
+					],
+					[
+						"Float",
+						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+					]
+				]
+			},
+			{
+				"Title": "HasPath(",
+				"Returns": "Integer",
+				"Parameters": [
+					[
+						"Integer",
+						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+					],
+					[
+						"Integer",
+						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+					]
+				]
+			},
+			{
+				"Title": "HasPathAt(",
+				"Returns": "Integer",
+				"Parameters": [
+					[
+						"Float",
+						"X position of A"
+					],
+					[
+						"Float",
+						"Y position of A"
+					],
+					[
+						"Float",
+						"X position of B"
+					],
+					[
+						"Float",
+						"Y position of B"
+					],
+					[
+						"Float",
+						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+					]
+				]
+			},
+			{
+				"Title": "IsBlocked(",
+				"Returns": "Integer",
+				"Parameters": [
+					[
+						"Float",
+						"X position in pixels"
+					],
+					[
+						"Float",
+						"Y position in pixels"
+					]
+				]
+			},
+			{
+				"Title": "GridWidth(",
+				"Returns": "Integer"
+			},
+			{
+				"Title": "GridHeight(",
+				"Returns": "Integer"
+			},
+			{
+				"Title": "CellSize(",
+				"Returns": "Integer"
+			},
+			{
+				"Title": "BlockedCells(",
+				"Returns": "Integer"
+			},
+			{
+				"Title": "CachedTargets(",
+				"Returns": "Integer"
+			}
+		],
+		"Properties": [
+			{
+				"Title": "Cell size (pixels)",
+				"Info": "Size of one grid cell in pixels. Smaller cells follow walls more precisely but cost more to calculate. 16 works well for most games; try 8 for tight spaces.",
+				"Type": "Editbox Number",
+				"DefaultState": 16,
+				"Minimum": 2,
+				"Maximum": 512
+			},
+			{
+				"Title": "Grid width (cells, 0 = fit frame)",
+				"Info": "Number of cells across the grid. Leave at 0 to cover the whole frame width.",
+				"Type": "Editbox Number",
+				"DefaultState": 0,
+				"Minimum": 0,
+				"Maximum": 4096
+			},
+			{
+				"Title": "Grid height (cells, 0 = fit frame)",
+				"Info": "Number of cells down the grid. Leave at 0 to cover the whole frame height.",
+				"Type": "Editbox Number",
+				"DefaultState": 0,
+				"Minimum": 0,
+				"Maximum": 4096
+			},
+			{
+				"Title": "Import Fusion obstacles on start",
+				"Info": "Tick to copy Fusion's own obstacle objects (backdrops set to Obstacle) into the grid when the frame starts. The Add Fusion obstacles action does the same at any time.",
+				"Type": "Checkbox",
+				"DefaultState": false
+			},
+			{
+				"Title": "Cells processed per frame (0 = unlimited)",
+				"Info": "Limits how many cells are processed each frame when targets move, spreading the work over several frames. 0 = no limit, so answers are always up to date. Try 20000 if the game stutters.",
+				"Type": "Editbox Number",
+				"DefaultState": 0,
+				"Minimum": 0,
+				"Maximum": 10000000
+			}
+		]
+	}
+}

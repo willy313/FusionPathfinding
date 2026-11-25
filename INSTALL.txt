@@ -1,0 +1,11 @@
+Flow Field Pathfinding - install
+================================
+Close Fusion first. Copy the files into your Fusion 2.5 install folder, keeping the folder structure:
+
+  Extensions\Unicode\FlowFieldPathfinding.mfx        -> <Fusion>\Extensions\Unicode\
+  Data\Runtime\Unicode\FlowFieldPathfinding.mfx      -> <Fusion>\Data\Runtime\Unicode\
+
+(The ANSI versions, if present, go in <Fusion>\Extensions\ and <Fusion>\Data\Runtime\.)
+Start Fusion. The object appears under "Insert object" as "Flow Field Pathfinding".
+
+If Fusion reports a problem, send the exact error text or a screenshot.
