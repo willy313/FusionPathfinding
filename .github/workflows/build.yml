@@ -1,0 +1,89 @@
+name: Build MFX
+
+# Builds the extension on GitHub's Windows runners. No local install needed.
+# Run: push to the repo, or Actions tab -> "Build MFX" -> Run workflow.
+# Download: open the finished run -> Artifacts -> FlowFieldPathfinding.
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+      - name: Pathfinding tests (plain C++, no Fusion needed)
+        run: |
+          g++ -std=c++17 -O2 test/test_flowfield.cpp -o /tmp/test_flowfield && /tmp/test_flowfield
+          g++ -std=c++17 -O2 test/test_body.cpp -o /tmp/test_body && /tmp/test_body
+
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout this repo
+        uses: actions/checkout@v4
+
+      - name: Check DarkExt.json matches the C++ signatures
+        shell: pwsh
+        run: python test/check_signatures.py
+
+      - name: Fetch DarkEdif SDK
+        shell: pwsh
+        run: git clone --depth 1 https://github.com/SortaCore/MMF2Exts.git sdk
+
+      - name: Put extension sources into the DarkEdif template project
+        shell: pwsh
+        run: |
+          Copy-Item -Path "src\*" -Destination "sdk\DarkEdif\DarkEdif Template\" -Recurse -Force
+          # The runner has no Windows XP toolset, so build for modern Windows.
+          Set-Content -Path "sdk\FusionSDKConfig.ini" -Value "[Global]`nWindowsXPCompatibility = false`nFavorSizeOrSpeed = speed`nMakePDBDuringReleaseBuild = false"
+
+      - name: Set up MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build (Unicode editor + runtime) - used by Fusion 2.5
+        shell: pwsh
+        run: |
+          # The SDK props write into $(SolutionDir); building a lone project leaves it unset, so pass it by environment.
+          $sd = (Resolve-Path "sdk").Path + "\"
+          $env:SolutionDir = $sd
+          $proj = "sdk\DarkEdif\DarkEdif Template\DarkEdif Template.Windows.vcxproj"
+          foreach ($cfg in @("Edittime Unicode", "Runtime Unicode")) {
+            msbuild $proj "/p:Configuration=$cfg" /p:Platform=Win32 "/p:SolutionDir=$sd" /m /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "Build failed for $cfg" }
+          }
+
+      - name: Build (ANSI editor + runtime) - for older Fusion 2.0 setups
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $sd = (Resolve-Path "sdk").Path + "\"
+          $env:SolutionDir = $sd
+          $proj = "sdk\DarkEdif\DarkEdif Template\DarkEdif Template.Windows.vcxproj"
+          foreach ($cfg in @("Edittime", "Runtime")) {
+            msbuild $proj "/p:Configuration=$cfg" /p:Platform=Win32 "/p:SolutionDir=$sd" /m /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "Build failed for $cfg" }
+          }
+
+      - name: Collect built files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Get-ChildItem -Path "sdk\MFX" -Recurse -Filter "*.mfx" | ForEach-Object {
+            $rel = $_.FullName.Substring((Resolve-Path "sdk\MFX").Path.Length + 1)
+            $dest = Join-Path "out" ($rel -replace 'DarkEdif Template\.mfx$', 'FlowFieldPathfinding.mfx')
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            Copy-Item $_.FullName $dest
+          }
+          Write-Host "Built files:"
+          Get-ChildItem -Path out -Recurse -File | ForEach-Object { Write-Host $_.FullName }
+          if (-not (Get-ChildItem -Path out -Recurse -Filter "*.mfx")) { throw "No .mfx files were produced" }
+          Copy-Item "INSTALL.txt" "out\INSTALL.txt"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: FlowFieldPathfinding
+          path: out/
