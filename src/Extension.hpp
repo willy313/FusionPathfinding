@@ -52,12 +52,17 @@ public:
 	bool pendingStartImport = false;   // import Fusion obstacles on the first Handle()
 	// Objects added as obstacles: Fixed value -> the cells they cover, so they can be moved or removed exactly.
 	std::unordered_map<int, FlowPath::CellRect> objectObstacles;
+	// Object types whose instances keep their distance from each other (see Crowd in FlowField.hpp)
+	struct AvoidGroup { short oil; float space; };
+	std::vector<AvoidGroup> avoidGroups;
 
 	// Helpers
 	// object -> hotspot position, pathfinding radius and (optionally) its current direction 0-31 (-1 if unknown)
 	bool Resolve(int fixedValue, float& x, float& y, float& radius, int* currentDirection = nullptr);
 	void ApplyObjectObstacles(bool add);
 	void ImportFusionObstacles(int layer);
+	void ApplyObjectZones(bool add, int padding);
+	void RefreshAgents(); // rebuilds the crowd from the current positions of all avoiding objects
 
 	// Actions
 	void CreateGrid(int width, int height, int cellSize, int originX, int originY);
@@ -67,6 +72,12 @@ public:
 	void AddFusionObstaclesAtLayer(int layer);
 	void AddObjectsAsObstacles(RunObject* obj);
 	void RemoveObjectsAsObstacles(RunObject* obj);
+	void AddObjectsToAvoid(RunObject* obj, int padding);
+	void AddPositionToAvoid(int x, int y, int padding);
+	void RemoveObjectsToAvoid(RunObject* obj);
+	void ClearAreasToAvoid();
+	void MakeObjectsAvoidEachOther(RunObject* obj, int space);
+	void StopObjectsAvoidingEachOther();
 	void SetCellsPerFrame(int cells);
 
 	// Conditions

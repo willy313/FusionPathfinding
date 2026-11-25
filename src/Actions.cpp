@@ -150,6 +150,93 @@ void Extension::AddFusionObstaclesAtLayer(int layer)
 }
 
 ///
+/// AREAS TO AVOID (soft obstacles)
+///
+/// Unlike obstacles these never block: units prefer to go round them, and cross them when there is no reasonable
+/// way round. They are part of the shared fields, so they suit things that do not move much (hazards, a boss, a
+/// crowded spot). For objects keeping their distance from each other use MakeObjectsAvoidEachOther instead.
+
+// Shared by Add / Remove. Setting an object again moves its area (areas are remembered by Fixed value).
+void Extension::ApplyObjectZones(bool add, int padding)
+{
+#ifdef _WIN32
+	Runtime.CancelRepeatingObjectAction();
+	const short oil = Runtime.GetOIListIndexFromObjectParam(0);
+
+	for (auto pObj : DarkEdif::ObjectIterator(rhPtr, oil, DarkEdif::Selection::Implicit))
+	{
+		HeaderObject* const ho = pObj->get_rHo();
+		const int fixedValue = ho->GetFixedValue();
+		if (!add)
+		{
+			sys.grid.RemoveZone(fixedValue);
+			continue;
+		}
+		float left, top, right, bottom;
+		if (!ObjectRect(rhPtr, ho, left, top, right, bottom))
+			continue;
+		FlowPath::SoftZone zone;
+		zone.x0 = left; zone.y0 = top; zone.x1 = right; zone.y1 = bottom;
+		zone.padding = (float)(std::max)(padding, 0);
+		sys.grid.SetZone(fixedValue, zone);
+	}
+#else
+	(void)add; (void)padding;
+#endif
+}
+
+void Extension::AddObjectsToAvoid(RunObject*, int padding)
+{
+	ApplyObjectZones(true, padding);
+}
+
+void Extension::RemoveObjectsToAvoid(RunObject*)
+{
+	ApplyObjectZones(false, 0);
+}
+
+void Extension::AddPositionToAvoid(int x, int y, int padding)
+{
+	sys.grid.AddPointZone((float)x, (float)y, (float)(std::max)(padding, 0));
+}
+
+void Extension::ClearAreasToAvoid()
+{
+	sys.grid.ClearZones();
+}
+
+///
+/// CROWD AVOIDANCE
+///
+/// Objects of the chosen type keep their distance from each other. The push is added when asking Direction() for
+/// one of them, and the object asking is left out, so nobody avoids itself.
+
+void Extension::MakeObjectsAvoidEachOther(RunObject*, int space)
+{
+#ifdef _WIN32
+	Runtime.CancelRepeatingObjectAction();
+	const short oil = Runtime.GetOIListIndexFromObjectParam(0);
+	const float spacePx = (float)(std::max)(space, 0);
+
+	bool found = false;
+	for (AvoidGroup& g : avoidGroups)
+		if (g.oil == oil) { g.space = spacePx; found = true; }
+	if (!found)
+		avoidGroups.push_back({ oil, spacePx });
+	RefreshAgents();
+#else
+	(void)space;
+#endif
+}
+
+void Extension::StopObjectsAvoidingEachOther()
+{
+	avoidGroups.clear();
+	sys.crowd.Clear();
+	sys.crowd.Rebuild();
+}
+
+///
 /// PERFORMANCE
 ///
 

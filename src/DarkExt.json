@@ -48,6 +48,36 @@
 				]
 			],
 			[
+				"Areas to avoid (soft obstacles)",
+				[
+					8,
+					"Add objects as areas to avoid"
+				],
+				[
+					9,
+					"Add position as an area to avoid"
+				],
+				[
+					10,
+					"Remove objects from areas to avoid"
+				],
+				[
+					11,
+					"Clear all areas to avoid"
+				]
+			],
+			[
+				"Avoid each other (crowds)",
+				[
+					12,
+					"Make objects keep their distance from each other"
+				],
+				[
+					13,
+					"Stop objects keeping their distance"
+				]
+			],
+			[
 				"Performance",
 				[
 					7,
@@ -196,6 +226,64 @@
 						"Maximum cells processed per frame; 0 = no limit. Raise it if the game stutters when targets move"
 					]
 				]
+			},
+			{
+				"Title": "Add %0 as areas to avoid, padding %1 px",
+				"Parameters": [
+					[
+						"Object",
+						"Objects to avoid. Their area is avoided when there is a way round it, and crossed when there is not. Add them again after they move"
+					],
+					[
+						"Integer",
+						"Padding in pixels: how far around the area units start avoiding it"
+					]
+				]
+			},
+			{
+				"Title": "Add position (%0, %1) as an area to avoid, padding %2 px",
+				"Parameters": [
+					[
+						"Integer",
+						"X position of the area"
+					],
+					[
+						"Integer",
+						"Y position of the area"
+					],
+					[
+						"Integer",
+						"Padding in pixels: radius of the area to avoid"
+					]
+				]
+			},
+			{
+				"Title": "Remove %0 from the areas to avoid",
+				"Parameters": [
+					[
+						"Object",
+						"Objects to stop avoiding (added with Add as areas to avoid)"
+					]
+				]
+			},
+			{
+				"Title": "Clear all areas to avoid"
+			},
+			{
+				"Title": "Make %0 keep their distance from each other, personal space %1 px",
+				"Parameters": [
+					[
+						"Object",
+						"Objects that avoid each other. All their instances are included automatically, also ones created later"
+					],
+					[
+						"Integer",
+						"Personal space in pixels: the gap between bodies they try to keep"
+					]
+				]
+			},
+			{
+				"Title": "Stop all objects keeping their distance from each other"
 			}
 		],
 		"Conditions": [
@@ -221,15 +309,15 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+						"Fixed value of the object that wants to move"
 					],
 					[
 						"Integer",
-						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+						"Fixed value of the object to move toward"
 					],
 					[
 						"Integer",
-						"Direction format: 4, 8, 16 or 32 = Fusion directions (0-31, ready for Set direction); 360 = smooth angle in degrees. When there is no path, or the object has arrived, its own current direction is returned so it keeps its heading"
+						"Directions (4, 8, 16, 32 or 360)"
 					]
 				]
 			},
@@ -239,27 +327,27 @@
 				"Parameters": [
 					[
 						"Float",
-						"X position of the moving object (A)"
+						"X of the object that wants to move"
 					],
 					[
 						"Float",
-						"Y position of the moving object (A)"
+						"Y of the object that wants to move"
 					],
 					[
 						"Float",
-						"X position to move toward (B)"
+						"X to move toward"
 					],
 					[
 						"Float",
-						"Y position to move toward (B)"
+						"Y to move toward"
 					],
 					[
 						"Float",
-						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+						"Radius of the moving object"
 					],
 					[
 						"Integer",
-						"Direction format: 4, 8, 16 or 32 = Fusion directions (0-31, ready for Set direction); 360 = smooth angle in degrees. The result is -1 when there is no path or the object has arrived"
+						"Directions (4, 8, 16, 32 or 360)"
 					]
 				]
 			},
@@ -269,11 +357,11 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+						"Fixed value of the object that wants to move"
 					],
 					[
 						"Integer",
-						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+						"Fixed value of the object to move toward"
 					]
 				]
 			},
@@ -283,23 +371,23 @@
 				"Parameters": [
 					[
 						"Float",
-						"X position of A"
+						"X of A"
 					],
 					[
 						"Float",
-						"Y position of A"
+						"Y of A"
 					],
 					[
 						"Float",
-						"X position of B"
+						"X of B"
 					],
 					[
 						"Float",
-						"Y position of B"
+						"Y of B"
 					],
 					[
 						"Float",
-						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+						"Radius of the moving object"
 					]
 				]
 			},
@@ -309,11 +397,11 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Fixed value of the object that wants to move, e.g. Fixed(\"Enemy\")"
+						"Fixed value of the object that wants to move"
 					],
 					[
 						"Integer",
-						"Fixed value of the object to move toward, e.g. Fixed(\"Player\")"
+						"Fixed value of the object to move toward"
 					]
 				]
 			},
@@ -323,23 +411,23 @@
 				"Parameters": [
 					[
 						"Float",
-						"X position of A"
+						"X of A"
 					],
 					[
 						"Float",
-						"Y position of A"
+						"Y of A"
 					],
 					[
 						"Float",
-						"X position of B"
+						"X of B"
 					],
 					[
 						"Float",
-						"Y position of B"
+						"Y of B"
 					],
 					[
 						"Float",
-						"Radius of the moving object in pixels (distance from its hotspot to its farthest edge; 0 = treat it as a point)"
+						"Radius of the moving object"
 					]
 				]
 			},
@@ -349,11 +437,11 @@
 				"Parameters": [
 					[
 						"Float",
-						"X position in pixels"
+						"X position"
 					],
 					[
 						"Float",
-						"Y position in pixels"
+						"Y position"
 					]
 				]
 			},

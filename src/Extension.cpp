@@ -26,6 +26,12 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkAction(5, AddObjectsAsObstacles);
 	LinkAction(6, RemoveObjectsAsObstacles);
 	LinkAction(7, SetCellsPerFrame);
+	LinkAction(8, AddObjectsToAvoid);
+	LinkAction(9, AddPositionToAvoid);
+	LinkAction(10, RemoveObjectsToAvoid);
+	LinkAction(11, ClearAreasToAvoid);
+	LinkAction(12, MakeObjectsAvoidEachOther);
+	LinkAction(13, StopObjectsAvoidingEachOther);
 
 	LinkCondition(0, PositionIsBlocked);
 
@@ -73,6 +79,9 @@ REFLAG Extension::Handle()
 		pendingStartImport = false;
 		ImportFusionObstacles(-1);
 	}
+	// Objects that keep their distance from each other: note where everybody is this tick
+	if (!avoidGroups.empty())
+		RefreshAgents();
 	// Ages the field cache and continues any unfinished builds within the per-frame budget
 	sys.Update();
 	return REFLAG::NONE;

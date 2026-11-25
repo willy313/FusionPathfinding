@@ -7,6 +7,11 @@
 //    own obstacles) and reference-counted shapes (objects added as obstacles), so removing one object only frees
 //    cells that nothing else covers.
 //  - From the obstacles the grid keeps, once, the distance from each cell to the nearest obstacle edge.
+//  - "Areas to avoid" are soft obstacles: cells inside (or near) them cost extra to cross, so paths go around when
+//    that is cheap and through when it is the only way. They are part of the shared fields.
+//  - Objects that should keep their distance from each other (crowds) are handled per query instead, with a push away
+//    from nearby agents that skips the asking object itself. Shared fields cannot do that: each object would be
+//    repelled by its own area.
 //  - A mover has a radius (the distance from its hotspot to its farthest edge). For that radius:
 //      * hard core: cells closer than the radius to an obstacle are blocked (the body cannot fit),
 //      * soft zone: cells out to twice the radius cost more to cross, which pushes paths (and units that end up
@@ -18,6 +23,10 @@
 //    movers heading for the same target cell with the same size class read the same field.
 //    Radii are rounded up to size classes so mixed sizes need only a few fields.
 //  - A query bilinearly blends the surrounding cell vectors, giving a continuous direction.
+//  - Soft obstacles ("areas to avoid") add traversal cost around a rectangle or point: paths go around them when there
+//    is a reasonable way round, and cross them when there is not.
+//  - Crowd avoidance keeps movers from piling onto each other. It is applied per mover at query time (the mover
+//    itself is excluded), which a shared field cannot do.
 
 #include <vector>
 #include <queue>
@@ -42,6 +51,9 @@ namespace FlowPath
 		bool Valid() const { return cx1 >= cx0 && cy1 >= cy0; }
 	};
 
+	// A soft obstacle: units prefer to stay `padding` pixels away from this rectangle (a point has x0 == x1, y0 == y1).
+	struct SoftZone { float x0 = 0.f, y0 = 0.f, x1 = 0.f, y1 = 0.f, padding = 0.f; };
+
 	class Grid
 	{
 	public:
@@ -52,10 +64,15 @@ namespace FlowPath
 		std::vector<std::uint8_t> imported; // cells marked by importing Fusion's obstacles
 		std::vector<std::uint8_t> raw;      // effective obstacles = imported or counts > 0
 		std::vector<float> edge;            // pixels from a cell centre to the nearest obstacle edge (0 inside, Inf if none)
-		std::uint32_t version = 0;          // bumped whenever the effective obstacles change
+		std::unordered_map<int, SoftZone> zones; // areas to avoid, by key (an object's Fixed value, or a negative key for positions)
+		std::vector<float> soft;            // extra traversal cost per cell from the areas to avoid (empty when there are none)
+		std::uint32_t version = 0;          // bumped whenever obstacles or areas to avoid change
 		bool dirty = false;                 // obstacles changed; call Refresh()
+		bool zonesDirty = false;            // areas to avoid changed; call Refresh()
+		int nextPointKey = -1000;
 
-		static constexpr float SoftCost = 6.f; // extra cost multiplier at the edge of the hard core
+		static constexpr float SoftCost = 6.f;  // extra cost multiplier at the edge of a mover's hard core (wall clearance)
+		static constexpr float AvoidCost = 8.f; // extra cost multiplier in the middle of an area to avoid
 
 		void Resize(int w, int h, float cell, float ox, float oy)
 		{
@@ -69,7 +86,9 @@ namespace FlowPath
 			imported.assign(n, 0);
 			raw.assign(n, 0);
 			edge.assign(n, Inf);
-			dirty = false;
+			zones.clear();
+			soft.clear();
+			dirty = zonesDirty = false;
 			++version;
 		}
 		bool InBounds(int cx, int cy) const { return cx >= 0 && cy >= 0 && cx < width && cy < height; }
@@ -83,14 +102,21 @@ namespace FlowPath
 		// Obstacle test for a mover of the given radius (cells outside the grid count as blocked).
 		bool BlockedFor(int idx, float radius) const { return raw[idx] != 0 || (radius > 0.f && edge[idx] < radius); }
 		bool IsBlockedFor(int cx, int cy, float radius) const { return !InBounds(cx, cy) || BlockedFor(Index(cx, cy), radius); }
-		// Traversal cost multiplier (>= 1) for a mover of the given radius.
+		// Traversal cost multiplier (>= 1) for a mover of the given radius: wall clearance plus areas to avoid.
 		float SlowFor(int idx, float radius) const
 		{
-			if (radius <= 0.f) return 1.f;
-			const float e = edge[idx];
-			if (e >= 2.f * radius || e < radius) return 1.f;
-			const float t = 1.f - (e - radius) / radius;
-			return 1.f + SoftCost * t * t;
+			float s = 1.f;
+			if (radius > 0.f)
+			{
+				const float e = edge[idx];
+				if (e < 2.f * radius && e >= radius)
+				{
+					const float t = 1.f - (e - radius) / radius;
+					s += SoftCost * t * t;
+				}
+			}
+			if (!soft.empty()) s += soft[idx];
+			return s;
 		}
 
 		// World rectangle [x0,x1) x [y0,y1) -> the cells it overlaps (clamped to the grid; invalid if none).
@@ -128,11 +154,32 @@ namespace FlowPath
 			dirty = true;
 		}
 
-		// Recomputes the effective obstacles and the distance-to-obstacle map. Cheap when nothing changed.
+		// Areas to avoid. Setting the same key again moves the area.
+		void SetZone(int key, const SoftZone& z) { zones[key] = z; zonesDirty = true; }
+		void RemoveZone(int key) { if (zones.erase(key)) zonesDirty = true; }
+		int AddPointZone(float x, float y, float padding)
+		{
+			const int key = nextPointKey--;
+			SoftZone z; z.x0 = z.x1 = x; z.y0 = z.y1 = y; z.padding = padding;
+			SetZone(key, z);
+			return key;
+		}
+		void ClearZones() { if (!zones.empty()) { zones.clear(); zonesDirty = true; } }
+
+		// Recomputes whatever changed. Cheap when nothing did.
 		void Refresh()
 		{
-			if (!dirty) return;
-			dirty = false;
+			if (!dirty && !zonesDirty) return;
+			if (dirty) { dirty = false; RebuildObstacles(); }
+			zonesDirty = false;
+			RebuildSoft();
+			++version;
+		}
+
+	private:
+		// Effective obstacles and the distance-to-obstacle map.
+		void RebuildObstacles()
+		{
 			const size_t n = (size_t)width * height;
 			std::vector<float> d(n, Inf);
 			bool any = false;
@@ -165,7 +212,31 @@ namespace FlowPath
 			}
 			for (size_t i = 0; i < n; ++i)
 				edge[i] = (d[i] == Inf) ? Inf : (d[i] == 0.f ? 0.f : (std::max)(0.f, d[i] - 0.5f) * cellSize);
-			++version;
+		}
+
+		// Extra cost around each area to avoid: full strength inside the area, fading to nothing `padding` pixels away.
+		void RebuildSoft()
+		{
+			if (zones.empty()) { soft.clear(); return; }
+			soft.assign((size_t)width * height, 0.f);
+			for (const auto& kv : zones)
+			{
+				const SoftZone& z = kv.second;
+				const float p = (std::max)(z.padding, 0.5f * cellSize); // at least the cell the area sits in
+				const CellRect r = RectToCells(z.x0 - p, z.y0 - p, z.x1 + p, z.y1 + p);
+				if (!r.Valid()) continue;
+				for (int cy = r.cy0; cy <= r.cy1; ++cy)
+					for (int cx = r.cx0; cx <= r.cx1; ++cx)
+					{
+						const float px = CenterX(cx), py = CenterY(cy);
+						const float dx = (std::max)((std::max)(z.x0 - px, px - z.x1), 0.f);
+						const float dy = (std::max)((std::max)(z.y0 - py, py - z.y1), 0.f);
+						const float dd = std::sqrt(dx * dx + dy * dy);
+						if (dd >= p) continue;
+						float& c = soft[Index(cx, cy)];
+						c = (std::min)(c + AvoidCost * (1.f - dd / p), 2.f * AvoidCost);
+					}
+			}
 		}
 	};
 
@@ -320,9 +391,31 @@ namespace FlowPath
 					float l = 0, r = 0, u = 0, dn = 0;
 					bool hl = val(cx - 1, cy, l), hr = val(cx + 1, cy, r);
 					bool hu = val(cx, cy - 1, u), hd = val(cx, cy + 1, dn);
+					// Smooth gradient (central differences where possible).
 					float gx = 0.f, gy = 0.f;
 					if (hl && hr) gx = (r - l) * 0.5f; else if (hr) gx = r - d; else if (hl) gx = d - l;
 					if (hu && hd) gy = (dn - u) * 0.5f; else if (hd) gy = dn - d; else if (hu) gy = d - u;
+					// Steepest descent: towards the lower neighbour on each axis. Where the path splits evenly around an
+					// obstacle (start, obstacle and target on one line) the central differences cancel and leave no
+					// direction at all, so use this instead, with a fixed tie-break so the unit commits to one side.
+					float sx = 0.f, sy = 0.f;
+					{
+						const float dl = hl ? d - l : -Inf, drr = hr ? d - r : -Inf; // positive = that neighbour is lower
+						const float du = hu ? d - u : -Inf, dd = hd ? d - dn : -Inf;
+						if (drr > 0.f || dl > 0.f) sx = (drr >= dl) ? -drr : dl;  // gradient points away from the lower side
+						if (dd > 0.f || du > 0.f) sy = (dd >= du) ? -dd : du;
+					}
+					const float cl = std::sqrt(gx * gx + gy * gy), sl = std::sqrt(sx * sx + sy * sy);
+					// The smooth direction must really lead downhill: the neighbour it points towards has to be lower.
+					// (On a ridge it can point back uphill, which would trap the unit between two cells.)
+					bool uphill = false;
+					if (cl > 1e-6f)
+					{
+						const float ddx = -gx, ddy = -gy;
+						if (std::fabs(ddx) > 0.25f * cl) uphill |= ddx > 0.f ? !(hr && r < d) : !(hl && l < d);
+						if (std::fabs(ddy) > 0.25f * cl) uphill |= ddy > 0.f ? !(hd && dn < d) : !(hu && u < d);
+					}
+					if (cl < 0.3f * sl || uphill) { gx = sx; gy = sy; }
 					float len = std::sqrt(gx * gx + gy * gy);
 					if (len > 1e-6f) dir[i] = { -gx / len, -gy / len };
 				}
@@ -473,11 +566,102 @@ namespace FlowPath
 		return (float)idx * (32.f / (float)directions);
 	}
 
+	// ---- Crowd avoidance ---------------------------------------------------------------------------------------
+	// A mover that takes part in crowd avoidance. Positions are hotspot positions, r is the body radius and space is
+	// the extra gap the mover tries to keep from others.
+	struct Agent { int id = 0; float x = 0.f, y = 0.f, r = 0.f, space = 0.f; };
+
+	// All agents of this tick in a spatial hash, so "who is near me?" costs a handful of lookups.
+	class Crowd
+	{
+	public:
+		std::vector<Agent> agents;
+
+		void Clear() { agents.clear(); index.clear(); buckets.clear(); }
+		void Add(const Agent& a) { agents.push_back(a); }
+		// Call once after adding this tick's agents.
+		void Rebuild()
+		{
+			index.clear(); buckets.clear();
+			maxExtent = 0.f;
+			for (const Agent& a : agents) maxExtent = (std::max)(maxExtent, a.r + a.space);
+			bucketSize = (std::max)(32.f, 2.f * maxExtent);
+			for (size_t i = 0; i < agents.size(); ++i)
+			{
+				index[agents[i].id] = i;
+				buckets[Key(BX(agents[i].x), BX(agents[i].y))].push_back(i);
+			}
+		}
+		const Agent* Find(int id) const
+		{
+			auto it = index.find(id);
+			return it == index.end() ? nullptr : &agents[it->second];
+		}
+
+		// Sum of pushes away from everybody overlapping the agent's personal space (itself excluded). Each push has a
+		// length of 0 (just touching the personal space) to 3 (on top of each other).
+		Vec2 Separation(const Agent& self) const
+		{
+			Vec2 push;
+			const float reach = self.r + self.space + maxExtent;
+			const int rings = (int)std::ceil(reach / bucketSize);
+			const int bx = BX(self.x), by = BX(self.y);
+			for (int j = -rings; j <= rings; ++j)
+				for (int i = -rings; i <= rings; ++i)
+				{
+					auto it = buckets.find(Key(bx + i, by + j));
+					if (it == buckets.end()) continue;
+					for (size_t k : it->second)
+					{
+						const Agent& o = agents[k];
+						if (o.id == self.id) continue;
+						const float range = self.r + o.r + (std::max)(self.space, o.space);
+						const float dx = self.x - o.x, dy = self.y - o.y;
+						const float d = std::sqrt(dx * dx + dy * dy);
+						if (d >= range) continue;
+						float strength = 1.f - d / range;
+						const float body = self.r + o.r;
+						if (d < body) strength += 2.f * (1.f - d / body); // overlapping bodies: push much harder
+						if (d > 1e-3f) { push.x += dx / d * strength; push.y += dy / d * strength; }
+						else
+						{
+							// Exactly on top of each other: split in a direction that differs per object
+							const float ang = (float)(self.id % 1000) * 2.3999632f;
+							push.x += std::cos(ang) * strength; push.y += std::sin(ang) * strength;
+						}
+					}
+				}
+			return push;
+		}
+
+	private:
+		float maxExtent = 0.f, bucketSize = 32.f;
+		std::unordered_map<int, size_t> index;
+		std::unordered_map<std::uint64_t, std::vector<size_t>> buckets;
+		int BX(float v) const { return (int)std::floor(v / bucketSize); }
+		static std::uint64_t Key(int bx, int by) { return ((std::uint64_t)(std::uint32_t)bx << 32) | (std::uint32_t)by; }
+	};
+
+	// Blends a push away from neighbours into a sample's direction (the path still dominates when nobody is close).
+	inline void ApplySeparation(Sample& s, Vec2 push, float gain = 3.f)
+	{
+		if (!s.reachable) return;
+		const float pl = std::sqrt(push.x * push.x + push.y * push.y);
+		if (pl < 1e-4f) return;
+		const float vl = std::sqrt(s.vec.x * s.vec.x + s.vec.y * s.vec.y);
+		if (vl < 1e-6f && pl * gain < 0.3f) return; // already at the goal and barely touched: stay put
+		float vx = vl > 1e-6f ? s.vec.x / vl : 0.f, vy = vl > 1e-6f ? s.vec.y / vl : 0.f;
+		vx += push.x * gain; vy += push.y * gain;
+		const float len = std::sqrt(vx * vx + vy * vy);
+		if (len > 1e-6f) s.vec = { vx / len, vy / len };
+	}
+
 	// All the fields of one extension object, created on demand and cached.
 	class System
 	{
 	public:
 		Grid grid;
+		Crowd crowd;                           // objects that keep their distance from each other (refreshed every tick)
 		std::unordered_map<std::uint64_t, Field> fields;
 		std::uint64_t tick = 0;
 		std::size_t maxFields = 16;            // cache size; the least recently used field is dropped first

@@ -21,7 +21,7 @@ That is all. The extension reads each enemy's position and size by itself, so th
 
 `Direction(..., 32)` returns Fusion's own direction number (0-31), so it goes straight into **Set direction**. If there is no path, or the object has already arrived, it returns the object's own current direction, so the object keeps its heading.
 
-### Direction formats
+### Directions argument
 | Last argument | Returns |
 |---|---|
 | `4`, `8`, `16`, `32` | Fusion direction number on the 0-31 scale, snapped to that many directions (4 gives 0/8/16/24) |
@@ -44,11 +44,27 @@ For custom movements (Mover with an angle, physics, your own speed code) use `36
 | Remove objects from obstacles | Takes them out again |
 | Clear all obstacles | Starts over |
 
+## Areas to avoid (soft obstacles)
+Obstacles block. Areas to avoid only **cost extra**: units go round them when there is a reasonable way round, and cross them when there is not. Use them for hazards, a boss, a crowded spot, anything that is bad to walk through but not impossible.
+
+| Action | Use |
+|---|---|
+| Add objects as areas to avoid (padding) | The object's rectangle plus the padding, in pixels, around it. Add the object again after it moves |
+| Add position as an area to avoid (padding) | A circle of the given radius at a position |
+| Remove objects from areas to avoid / Clear all areas to avoid | Take them away again |
+
+Areas are part of the shared fields, so they suit things that do not move much. **Do not add the objects you are steering as areas to avoid** (the enemies themselves): each enemy would be pushed away from its own area. Use the next section for that.
+
+## Objects keeping their distance from each other (crowds)
+`Make Enemy keep their distance from each other, personal space 8 px` is set once. From then on every enemy instance (also ones created later) pushes its neighbours apart whenever `Direction(...)` is asked for it, and never pushes itself. Personal space is the gap between bodies they try to keep. Body size comes from the object's image, as for pathfinding. Only `Direction` (the Fixed-value version) includes this push. `Stop all objects keeping their distance` switches it off.
+
+Crowded corridors can still jam: avoidance nudges units apart, it does not plan routes for a queue.
+
 ## Expressions
 | Expression | Meaning |
 |---|---|
-| `Direction(fixedA, fixedB, format)` | Direction for object A to reach object B |
-| `DirectionAt(ax, ay, bx, by, radius, format)` | Same with positions and a radius you choose; -1 when there is no path or it has arrived |
+| `Direction(fixedA, fixedB, directions)` | Direction for object A to reach object B. `directions` is 4, 8, 16, 32 or 360 |
+| `DirectionAt(ax, ay, bx, by, radius, directions)` | Same with positions and a radius you choose (no crowd avoidance); -1 when there is no path or it has arrived |
 | `PathDistance(fixedA, fixedB)` / `PathDistanceAt(...)` | Path length in pixels (slightly above the true distance near walls); -1 if there is no path |
 | `HasPath(fixedA, fixedB)` / `HasPathAt(...)` | 1 if a path exists, otherwise 0 |
 | `IsBlocked(x, y)` | 1 if the position is inside an obstacle |

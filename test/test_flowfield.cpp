@@ -222,6 +222,123 @@ int main()
 		CHECK(FormatDirection(a355, 4) == 0.f, "4 directions wraps 355 deg back to 0 (right)");
 		CHECK(FormatDirection(Sample(), 32) == -1.f, "no sample -> -1");
 	}
+	// 16) Areas to avoid (soft obstacles): paths go around them when there is room, but they never block.
+	{
+		auto closest = [](float zonePad, bool* arrived) {
+			System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+			const float zx = C(30), zy = C(20);
+			if (zonePad > 0.f) s.grid.AddPointZone(zx, zy, zonePad);
+			float x = C(3), y = C(20), bx = C(55), by = C(20), best = 1e9f; *arrived = false;
+			for (int i = 0; i < 4000; ++i)
+			{
+				Sample sm = s.Query(x, y, bx, by, 0.f);
+				if (!sm.reachable) break;
+				if (std::sqrt((bx - x) * (bx - x) + (by - y) * (by - y)) < 3.f) { *arrived = true; break; }
+				x += sm.vec.x * 2.f; y += sm.vec.y * 2.f;
+				best = (std::min)(best, std::sqrt((x - zx) * (x - zx) + (y - zy) * (y - zy)));
+			}
+			return best;
+		};
+		bool a0, a1; float c0 = closest(0.f, &a0), c1 = closest(80.f, &a1);
+		printf("      closest approach to the area's centre: without the area %.1f px, with an 80 px area %.1f px\n", c0, c1);
+		CHECK(a0 && a1, "agent reaches the target with and without an area to avoid");
+		CHECK(c1 > c0 + 30.f, "the path bends away from an area to avoid when there is room");
+	}
+	{
+		System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+		Block(s, 10, 0, 40, 19); Block(s, 10, 23, 40, 39); // a 3-cell corridor (rows 20..22) from x=10 to 40
+		s.grid.AddPointZone(C(25), C(21), 100.f);          // an area to avoid filling the whole corridor
+		bool hit; int steps = Walk(s, C(3), C(21), C(55), C(21), 0.f, 2.f, 6000, &hit);
+		CHECK(steps > 0 && !hit, "an area to avoid never blocks: the agent still crosses it when there is no other way");
+	}
+	{
+		System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+		float base = s.Query(C(3), C(20), C(55), C(20), 0.f).distance;
+		int k = s.grid.AddPointZone(C(30), C(20), 80.f);
+		float with = s.Query(C(3), C(20), C(55), C(20), 0.f).distance;
+		s.grid.SetZone(k, SoftZone{ C(30), C(5), C(30), C(5), 80.f }); // same key = the area moves away
+		float moved = s.Query(C(3), C(20), C(55), C(20), 0.f).distance;
+		s.grid.RemoveZone(k);
+		float removed = s.Query(C(3), C(20), C(55), C(20), 0.f).distance;
+		CHECK(with > base + 1.f, "an area to avoid raises the cost of the way through it");
+		CHECK(moved < with, "moving an area to avoid away makes the way through cheaper again");
+		CHECK(std::fabs(removed - base) < 0.5f, "removing the area restores the original distance");
+		s.grid.AddPointZone(C(30), C(20), 80.f); s.grid.ClearZones();
+		CHECK(std::fabs(s.Query(C(3), C(20), C(55), C(20), 0.f).distance - base) < 0.5f, "clearing all areas to avoid restores the original distance");
+	}
+	// 17) Crowd avoidance: neighbours push each other apart; the mover itself is excluded.
+	{
+		Crowd c;
+		auto mk = [](int id, float x, float y) { Agent a; a.id = id; a.x = x; a.y = y; a.r = 10.f; a.space = 8.f; return a; };
+		c.Add(mk(1, 100, 100)); c.Add(mk(2, 110, 100)); c.Add(mk(3, 400, 100)); c.Rebuild();
+		Vec2 p1 = c.Separation(*c.Find(1)), p2 = c.Separation(*c.Find(2)), p3 = c.Separation(*c.Find(3));
+		CHECK(p1.x < -0.1f && std::fabs(p1.y) < 1e-3f, "overlapping neighbour pushes the agent away from it");
+		CHECK(p2.x > 0.1f && std::fabs(p1.x + p2.x) < 1e-3f, "the two agents are pushed in opposite directions, equally");
+		CHECK(p3.x == 0.f && p3.y == 0.f, "a far-away agent is not pushed");
+		Crowd one; one.Add(mk(7, 5, 5)); one.Rebuild();
+		CHECK(one.Separation(*one.Find(7)).x == 0.f, "an agent is never pushed by itself");
+		Crowd same; same.Add(mk(1, 50, 50)); same.Add(mk(2, 50, 50)); same.Rebuild();
+		Vec2 q1 = same.Separation(*same.Find(1)), q2 = same.Separation(*same.Find(2));
+		CHECK((q1.x != 0.f || q1.y != 0.f) && (q1.x != q2.x || q1.y != q2.y), "agents exactly on top of each other split in different directions");
+		Crowd edgeBucket; edgeBucket.Add(mk(1, 63.9f, 40)); edgeBucket.Add(mk(2, 64.1f, 40)); edgeBucket.Rebuild();
+		CHECK(edgeBucket.Separation(*edgeBucket.Find(1)).x < 0.f, "neighbours on either side of a bucket boundary still see each other");
+		Sample s; s.reachable = true; s.vec = { 1.f, 0.f };
+		Sample none = s; ApplySeparation(none, Vec2{});
+		CHECK(none.vec.x == 1.f && none.vec.y == 0.f, "no neighbours: the path direction is untouched");
+		Sample pushed = s; ApplySeparation(pushed, Vec2{ 0.f, 0.8f });
+		CHECK(pushed.vec.y > 0.3f && pushed.vec.x > 0.f, "neighbours bend the path direction without reversing it");
+		Sample arrived; arrived.reachable = true; ApplySeparation(arrived, Vec2{ 0.05f, 0.f });
+		CHECK(arrived.vec.x == 0.f && arrived.vec.y == 0.f, "a unit that has arrived stays put when barely touched");
+		Sample noPath; ApplySeparation(noPath, Vec2{ 1.f, 0.f });
+		CHECK(!noPath.reachable && noPath.vec.x == 0.f, "no path stays no path");
+	}
+	// 18) Crowd simulation: a group sent to one spot piles up without avoidance and spreads out with it.
+	{
+		auto run = [](bool avoid, float* minDist, float* maxLeft) {
+			System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+			struct U { float x, y; }; std::vector<U> u;
+			for (int i = 0; i < 12; ++i) u.push_back({ C(3) + (float)(i % 4) * 12.f, C(10) + (float)(i / 4) * 12.f });
+			const float tx = C(40), ty = C(25), R = 10.f;
+			for (int step = 0; step < 1500; ++step)
+			{
+				s.crowd.Clear();
+				for (int i = 0; i < 12; ++i) { Agent a; a.id = i + 1; a.x = u[i].x; a.y = u[i].y; a.r = R; a.space = 8.f; s.crowd.Add(a); }
+				s.crowd.Rebuild();
+				for (int i = 0; i < 12; ++i)
+				{
+					Sample sm = s.Query(u[i].x, u[i].y, tx, ty, R);
+					if (avoid) ApplySeparation(sm, s.crowd.Separation(*s.crowd.Find(i + 1)));
+					u[i].x += sm.vec.x * 2.f; u[i].y += sm.vec.y * 2.f;
+				}
+			}
+			*minDist = 1e9f; *maxLeft = 0.f;
+			for (int i = 0; i < 12; ++i)
+			{
+				*maxLeft = (std::max)(*maxLeft, std::sqrt((u[i].x - tx) * (u[i].x - tx) + (u[i].y - ty) * (u[i].y - ty)));
+				for (int j = i + 1; j < 12; ++j) *minDist = (std::min)(*minDist, std::sqrt((u[i].x - u[j].x) * (u[i].x - u[j].x) + (u[i].y - u[j].y) * (u[i].y - u[j].y)));
+			}
+		};
+		float m0, f0, m1, f1; run(false, &m0, &f0); run(true, &m1, &f1);
+		printf("      12 units sent to one spot: closest pair without avoidance %.1f px, with avoidance %.1f px (bodies are 20 px across); farthest from the spot %.0f / %.0f px\n", m0, m1, f0, f1);
+		CHECK(m1 > m0 + 8.f, "avoidance clearly keeps units further apart");
+		CHECK(m1 >= 15.f, "with avoidance no two units end up inside each other's bodies");
+		CHECK(f1 < 160.f, "with avoidance the whole group still gathers around the target");
+	}
+	// 19) Exact symmetry: start, obstacle centre and target on one line must not leave the unit without a direction.
+	{
+		for (float R : { 0.f, 16.f })
+		{
+			System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+			Block(s, 28, 16, 31, 23); // rows 16..23 span y 256..384, symmetric around y = 320
+			bool hit; int steps = Walk(s, C(3), 320.f, C(55), 320.f, R, 2.f, 6000, &hit);
+			char msg[112]; snprintf(msg, sizeof msg, "block exactly between start and target (radius %.0f): agent still gets round it%s", R, R > 0.f ? " without touching it" : "");
+			CHECK(steps > 0 && (R == 0.f || !hit), msg); // a point-sized mover may graze the corner it goes round
+		}
+		System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+		s.grid.AddPointZone(C(30), 320.f, 80.f);
+		bool hit; int steps = Walk(s, C(3), 320.f, C(55), 320.f, 0.f, 2.f, 6000, &hit);
+		CHECK(steps > 0, "area to avoid exactly between start and target: agent still gets round it");
+	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{
 		System s; s.ResizeGrid(512, 512, 8.f, 0, 0);

@@ -1,5 +1,17 @@
 #include "Common.hpp"
 
+#ifdef _WIN32
+// Radius pathfinding uses for an object: the distance from its hotspot to the farthest corner of its image,
+// so the whole body fits wherever the hotspot goes.
+static float RadiusOfHeader(HeaderObject* ho)
+{
+	const float w = (float)ho->get_ImgWidth(), h = (float)ho->get_ImgHeight();
+	const float xs = (float)ho->get_ImgXSpot(), ys = (float)ho->get_ImgYSpot();
+	const float dx = (std::max)(xs, w - xs), dy = (std::max)(ys, h - ys);
+	return (w > 0.f && h > 0.f) ? std::sqrt(dx * dx + dy * dy) : 0.f;
+}
+#endif
+
 // Looks up an object by its Fixed value (Fixed("Enemy") in the expression editor).
 // Gives its hotspot position and the radius pathfinding should use for it: the distance from the hotspot to the
 // farthest corner of its image, so the whole body fits wherever the hotspot goes.
@@ -15,10 +27,7 @@ bool Extension::Resolve(int fixedValue, float& x, float& y, float& radius, int* 
 	x = (float)ho->get_X();
 	y = (float)ho->get_Y();
 
-	const float w = (float)ho->get_ImgWidth(), h = (float)ho->get_ImgHeight();
-	const float xs = (float)ho->get_ImgXSpot(), ys = (float)ho->get_ImgYSpot();
-	const float dx = (std::max)(xs, w - xs), dy = (std::max)(ys, h - ys);
-	radius = (w > 0.f && h > 0.f) ? std::sqrt(dx * dx + dy * dy) : 0.f;
+	radius = RadiusOfHeader(ho);
 
 	if (currentDirection)
 	{
@@ -33,6 +42,28 @@ bool Extension::Resolve(int fixedValue, float& x, float& y, float& radius, int* 
 #endif
 }
 
+// Collects every instance of the objects that keep their distance from each other (all instances, whatever is
+// currently picked, including ones created since) into the crowd.
+void Extension::RefreshAgents()
+{
+	sys.crowd.Clear();
+#ifdef _WIN32
+	for (const AvoidGroup& g : avoidGroups)
+		for (auto pObj : DarkEdif::ObjectIterator(rhPtr, g.oil, DarkEdif::Selection::All))
+		{
+			HeaderObject* const ho = pObj->get_rHo();
+			FlowPath::Agent a;
+			a.id = ho->GetFixedValue();
+			a.x = (float)ho->get_X();
+			a.y = (float)ho->get_Y();
+			a.r = RadiusOfHeader(ho);
+			a.space = g.space;
+			sys.crowd.Add(a);
+		}
+#endif
+	sys.crowd.Rebuild();
+}
+
 // ---- Direction -------------------------------------------------------------------------------------------------
 // Every expression asks the field for the target's grid cell (created on first use and shared by everyone heading
 // there), so the cost per call is constant however many objects ask.
@@ -44,7 +75,11 @@ float Extension::Direction(int fixedA, int fixedB, int directions)
 	if (!Resolve(fixedA, ax, ay, ar, &currentDir) || !Resolve(fixedB, bx, by, br))
 		return -1.f;
 
-	const float result = FlowPath::FormatDirection(sys.Query(ax, ay, bx, by, ar), directions);
+	FlowPath::Sample sample = sys.Query(ax, ay, bx, by, ar);
+	// Keep distance from the other objects of the crowd (the object asking is excluded)
+	if (const FlowPath::Agent* self = sys.crowd.Find(fixedA))
+		FlowPath::ApplySeparation(sample, sys.crowd.Separation(*self));
+	const float result = FlowPath::FormatDirection(sample, directions);
 	if (result >= 0.f || currentDir < 0)
 		return result;
 
