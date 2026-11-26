@@ -32,6 +32,8 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkAction(11, ClearAreasToAvoid);
 	LinkAction(12, MakeObjectsAvoidEachOther);
 	LinkAction(13, StopObjectsAvoidingEachOther);
+	LinkAction(14, DebugSaveGridImage);
+	LinkAction(15, DebugSaveBoundaryImage);
 
 	LinkCondition(0, PositionIsBlocked);
 

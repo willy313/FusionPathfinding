@@ -1,16 +1,5 @@
 #include "Common.hpp"
 
-#ifdef _WIN32
-// Radius pathfinding uses for an object: the distance from its hotspot to the farthest corner of its image,
-// so the whole body fits wherever the hotspot goes.
-static float RadiusOfHeader(HeaderObject* ho)
-{
-	const float w = (float)ho->get_ImgWidth(), h = (float)ho->get_ImgHeight();
-	const float xs = (float)ho->get_ImgXSpot(), ys = (float)ho->get_ImgYSpot();
-	const float dx = (std::max)(xs, w - xs), dy = (std::max)(ys, h - ys);
-	return (w > 0.f && h > 0.f) ? std::sqrt(dx * dx + dy * dy) : 0.f;
-}
-#endif
 
 // Looks up an object by its Fixed value (Fixed("Enemy") in the expression editor).
 // Gives its hotspot position and the radius pathfinding should use for it: the distance from the hotspot to the
@@ -56,8 +45,7 @@ void Extension::RefreshAgents()
 			a.id = ho->GetFixedValue();
 			a.x = (float)ho->get_X();
 			a.y = (float)ho->get_Y();
-			a.r = RadiusOfHeader(ho);
-			a.space = g.space;
+			a.r = g.radius > 0.f ? g.radius : InscribedRadius(ho); // personal space around the hotspot
 			sys.crowd.Add(a);
 		}
 #endif
@@ -76,9 +64,9 @@ float Extension::Direction(int fixedA, int fixedB, int directions)
 		return -1.f;
 
 	FlowPath::Sample sample = sys.Query(ax, ay, bx, by, ar);
-	// Keep distance from the other objects of the crowd (the object asking is excluded)
+	// Keep distance from the other objects of the crowd (the object asking is excluded), without being pushed into walls
 	if (const FlowPath::Agent* self = sys.crowd.Find(fixedA))
-		FlowPath::ApplySeparation(sample, sys.crowd.Separation(*self));
+		FlowPath::ApplyCrowd(sys.grid, ar, ax, ay, sample, sys.crowd.Separation(*self));
 	const float result = FlowPath::FormatDirection(sample, directions);
 	if (result >= 0.f || currentDir < 0)
 		return result;

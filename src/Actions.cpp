@@ -1,4 +1,5 @@
 #include "Common.hpp"
+#include <fstream>
 
 ///
 /// GRID
@@ -34,34 +35,6 @@ void Extension::ClearObstacles()
 /// OBSTACLES
 ///
 
-#ifdef _WIN32
-// Bounding rectangle of an object in frame coordinates.
-static bool ObjectRect(RunHeader* rhPtr, HeaderObject* ho, float& left, float& top, float& right, float& bottom)
-{
-	// Rectangle A: position + hotspot + image size. Frame coordinates, always valid, ignores scale/angle.
-	left = (float)(ho->get_X() - ho->get_ImgXSpot());
-	top = (float)(ho->get_Y() - ho->get_ImgYSpot());
-	right = left + (float)ho->get_ImgWidth();
-	bottom = top + (float)ho->get_ImgHeight();
-
-	// Rectangle B: hoRect is the on-screen display rectangle in WINDOW coordinates and does account for
-	// scale/angle. Convert to frame coordinates and use it only if it agrees with A (same centre, within
-	// the object's size); otherwise trust A.
-	if (ho->hoRect.right > ho->hoRect.left && ho->hoRect.bottom > ho->hoRect.top)
-	{
-		const float bl = (float)(ho->hoRect.left + rhPtr->get_WindowX()), bt = (float)(ho->hoRect.top + rhPtr->get_WindowY());
-		const float br = (float)(ho->hoRect.right + rhPtr->get_WindowX()), bb = (float)(ho->hoRect.bottom + rhPtr->get_WindowY());
-		const float acx = (left + right) * 0.5f, acy = (top + bottom) * 0.5f;
-		const float bcx = (bl + br) * 0.5f, bcy = (bt + bb) * 0.5f;
-		const float tolX = (std::max)(right - left, br - bl), tolY = (std::max)(bottom - top, bb - bt);
-		if (std::fabs(acx - bcx) <= tolX * 0.5f && std::fabs(acy - bcy) <= tolY * 0.5f)
-		{
-			left = bl; top = bt; right = br; bottom = bb;
-		}
-	}
-	return right > left && bottom > top;
-}
-#endif
 
 // Shared by Add / Remove. Fusion repeats an action once per selected object; we do the loop ourselves instead.
 // Each object remembers which cells it covers (by Fixed value), so adding it again moves it and removing it is exact.
@@ -208,24 +181,25 @@ void Extension::ClearAreasToAvoid()
 ///
 /// CROWD AVOIDANCE
 ///
-/// Objects of the chosen type keep their distance from each other. The push is added when asking Direction() for
-/// one of them, and the object asking is left out, so nobody avoids itself.
+/// Objects of the chosen type keep their distance from each other. Each has a personal space: a circle of the given
+/// radius around its hotspot (0 = the largest circle that fits inside the object), so bodies may overlap a little.
+/// The push is added when asking Direction() for one of them, and the object asking is left out.
 
-void Extension::MakeObjectsAvoidEachOther(RunObject*, int space)
+void Extension::MakeObjectsAvoidEachOther(RunObject*, int radius)
 {
 #ifdef _WIN32
 	Runtime.CancelRepeatingObjectAction();
 	const short oil = Runtime.GetOIListIndexFromObjectParam(0);
-	const float spacePx = (float)(std::max)(space, 0);
+	const float radiusPx = (float)(std::max)(radius, 0);
 
 	bool found = false;
 	for (AvoidGroup& g : avoidGroups)
-		if (g.oil == oil) { g.space = spacePx; found = true; }
+		if (g.oil == oil) { g.radius = radiusPx; found = true; }
 	if (!found)
-		avoidGroups.push_back({ oil, spacePx });
+		avoidGroups.push_back({ oil, radiusPx });
 	RefreshAgents();
 #else
-	(void)space;
+	(void)radius;
 #endif
 }
 
@@ -243,4 +217,69 @@ void Extension::StopObjectsAvoidingEachOther()
 void Extension::SetCellsPerFrame(int cells)
 {
 	sys.cellsPerFrame = (std::size_t)(std::max)(cells, 0);
+}
+
+///
+/// DEBUG IMAGES
+///
+/// Pictures of how the extension sees the frame, written as transparent PNG files that line up with the frame when
+/// the grid starts at 0,0. Show one over the game with an Active Picture object (Load picture from file).
+
+#ifdef _WIN32
+static bool WriteBinaryFile(const TCHAR* path, const std::vector<std::uint8_t>& bytes)
+{
+	if (!path || !*path || bytes.empty())
+		return false;
+	std::ofstream file(path, std::ios::binary);
+	if (!file)
+		return false;
+	file.write((const char*)bytes.data(), (std::streamsize)bytes.size());
+	return (bool)file;
+}
+#endif
+
+// Grid as interpreted: obstacles (red), areas to avoid (blue) and the cell grid.
+void Extension::DebugSaveGridImage(const TCHAR* path)
+{
+#ifdef _WIN32
+	sys.grid.Refresh();
+	const FlowPath::DebugImage img = FlowPath::RenderDebugImage(sys.grid, 0.f, true, {}, {});
+	WriteBinaryFile(path, FlowPath::EncodePng(img.width, img.height, img.rgba));
+#else
+	(void)path;
+#endif
+}
+
+// What objects of this size see: cells they cannot enter (orange), the zone where paths cost extra near walls
+// (yellow), plus a circle for each selected object's pathfinding size (cyan), its personal space if it keeps
+// its distance from others (green), its bounding rectangle (dark red) and its hotspot (magenta cross).
+void Extension::DebugSaveBoundaryImage(RunObject*, const TCHAR* path)
+{
+#ifdef _WIN32
+	Runtime.CancelRepeatingObjectAction();
+	sys.grid.Refresh();
+	if (!avoidGroups.empty())
+		RefreshAgents();
+
+	const short oil = Runtime.GetOIListIndexFromObjectParam(0);
+	float radius = 0.f;
+	std::vector<FlowPath::DebugRect> rects;
+	std::vector<FlowPath::DebugCircle> circles;
+	for (auto pObj : DarkEdif::ObjectIterator(rhPtr, oil, DarkEdif::Selection::Implicit))
+	{
+		HeaderObject* const ho = pObj->get_rHo();
+		const float r = RadiusOfHeader(ho);
+		radius = (std::max)(radius, r);
+		circles.push_back({ (float)ho->get_X(), (float)ho->get_Y(), r, FlowPath::Rgba{ 0, 200, 255, 255 } });
+		if (const FlowPath::Agent* agent = sys.crowd.Find(ho->GetFixedValue()))
+			circles.push_back({ agent->x, agent->y, agent->r, FlowPath::Rgba{ 60, 220, 60, 255 } });
+		float left, top, right, bottom;
+		if (ObjectRect(rhPtr, ho, left, top, right, bottom))
+			rects.push_back({ left, top, right, bottom, FlowPath::Rgba{ 160, 0, 0, 255 } });
+	}
+	const FlowPath::DebugImage img = FlowPath::RenderDebugImage(sys.grid, radius, false, rects, circles);
+	WriteBinaryFile(path, FlowPath::EncodePng(img.width, img.height, img.rgba));
+#else
+	(void)path;
+#endif
 }

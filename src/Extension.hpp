@@ -53,7 +53,7 @@ public:
 	// Objects added as obstacles: Fixed value -> the cells they cover, so they can be moved or removed exactly.
 	std::unordered_map<int, FlowPath::CellRect> objectObstacles;
 	// Object types whose instances keep their distance from each other (see Crowd in FlowField.hpp)
-	struct AvoidGroup { short oil; float space; };
+	struct AvoidGroup { short oil; float radius; }; // radius = personal space around the hotspot (0 = the object's own size)
 	std::vector<AvoidGroup> avoidGroups;
 
 	// Helpers
@@ -79,6 +79,8 @@ public:
 	void MakeObjectsAvoidEachOther(RunObject* obj, int space);
 	void StopObjectsAvoidingEachOther();
 	void SetCellsPerFrame(int cells);
+	void DebugSaveGridImage(const TCHAR* path);
+	void DebugSaveBoundaryImage(RunObject* obj, const TCHAR* path);
 
 	// Conditions
 	bool PositionIsBlocked(int x, int y);

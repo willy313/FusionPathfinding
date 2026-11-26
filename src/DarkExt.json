@@ -83,6 +83,17 @@
 					7,
 					"Limit work per frame"
 				]
+			],
+			[
+				"Debug",
+				[
+					14,
+					"Debug: save grid image"
+				],
+				[
+					15,
+					"Debug: save boundary image"
+				]
 			]
 		],
 		"ConditionMenu": [
@@ -270,7 +281,7 @@
 				"Title": "Clear all areas to avoid"
 			},
 			{
-				"Title": "Make %0 keep their distance from each other, personal space %1 px",
+				"Title": "Make %0 keep their distance from each other, personal space radius %1 px",
 				"Parameters": [
 					[
 						"Object",
@@ -278,12 +289,34 @@
 					],
 					[
 						"Integer",
-						"Personal space in pixels: the gap between bodies they try to keep"
+						"Personal space radius in pixels, measured from the object's centre (0 = the largest circle that fits inside the object). Objects may overlap a little before pushing each other apart"
 					]
 				]
 			},
 			{
 				"Title": "Stop all objects keeping their distance from each other"
+			},
+			{
+				"Title": "Debug: save an image of the grid (obstacles and areas to avoid) to %0",
+				"Parameters": [
+					[
+						"Text",
+						"File name or path of the PNG image to write, e.g. grid.png"
+					]
+				]
+			},
+			{
+				"Title": "Debug: save an image of the boundary of %0 to %1",
+				"Parameters": [
+					[
+						"Object",
+						"Objects whose boundary to show (their pathfinding size is used; a circle is drawn around each one)"
+					],
+					[
+						"Text",
+						"File name or path of the PNG image to write, e.g. boundary.png"
+					]
+				]
 			}
 		],
 		"Conditions": [

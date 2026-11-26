@@ -269,7 +269,7 @@ int main()
 	// 17) Crowd avoidance: neighbours push each other apart; the mover itself is excluded.
 	{
 		Crowd c;
-		auto mk = [](int id, float x, float y) { Agent a; a.id = id; a.x = x; a.y = y; a.r = 10.f; a.space = 8.f; return a; };
+		auto mk = [](int id, float x, float y) { Agent a; a.id = id; a.x = x; a.y = y; a.r = 14.f; return a; };
 		c.Add(mk(1, 100, 100)); c.Add(mk(2, 110, 100)); c.Add(mk(3, 400, 100)); c.Rebuild();
 		Vec2 p1 = c.Separation(*c.Find(1)), p2 = c.Separation(*c.Find(2)), p3 = c.Separation(*c.Find(3));
 		CHECK(p1.x < -0.1f && std::fabs(p1.y) < 1e-3f, "overlapping neighbour pushes the agent away from it");
@@ -302,7 +302,7 @@ int main()
 			for (int step = 0; step < 1500; ++step)
 			{
 				s.crowd.Clear();
-				for (int i = 0; i < 12; ++i) { Agent a; a.id = i + 1; a.x = u[i].x; a.y = u[i].y; a.r = R; a.space = 8.f; s.crowd.Add(a); }
+				for (int i = 0; i < 12; ++i) { Agent a; a.id = i + 1; a.x = u[i].x; a.y = u[i].y; a.r = 14.f; s.crowd.Add(a); }
 				s.crowd.Rebuild();
 				for (int i = 0; i < 12; ++i)
 				{
@@ -319,9 +319,10 @@ int main()
 			}
 		};
 		float m0, f0, m1, f1; run(false, &m0, &f0); run(true, &m1, &f1);
-		printf("      12 units sent to one spot: closest pair without avoidance %.1f px, with avoidance %.1f px (bodies are 20 px across); farthest from the spot %.0f / %.0f px\n", m0, m1, f0, f1);
+		printf("      12 units sent to one spot: closest pair without avoidance %.1f px, with avoidance %.1f px (personal space radius 14 px, circles touch at 28 px); farthest from the spot %.0f / %.0f px\n", m0, m1, f0, f1);
 		CHECK(m1 > m0 + 8.f, "avoidance clearly keeps units further apart");
-		CHECK(m1 >= 15.f, "with avoidance no two units end up inside each other's bodies");
+		CHECK(m1 >= 14.f, "with avoidance personal-space circles overlap by less than half");
+		CHECK(m1 < 28.f + 4.f, "with avoidance units can overlap a little: they are not held at a full circle apart");
 		CHECK(f1 < 160.f, "with avoidance the whole group still gathers around the target");
 	}
 	// 19) Exact symmetry: start, obstacle centre and target on one line must not leave the unit without a direction.
@@ -338,6 +339,64 @@ int main()
 		s.grid.AddPointZone(C(30), 320.f, 80.f);
 		bool hit; int steps = Walk(s, C(3), 320.f, C(55), 320.f, 0.f, 2.f, 6000, &hit);
 		CHECK(steps > 0, "area to avoid exactly between start and target: agent still gets round it");
+	}
+	// 20) Crowd pushes must never drive units into walls (a crowd squeezed into a corner pocket).
+	{
+		auto run = [](bool guard, int* enteredWall, float* maxX, float* maxY) {
+			System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+			Block(s, 40, 0, 59, 39);                       // wall on the right (x >= 640)
+			Block(s, 0, 30, 59, 39);                       // wall below (y >= 480)
+			const int N = 30;
+			struct U { float x, y; }; std::vector<U> u;
+			for (int i = 0; i < N; ++i) u.push_back({ C(8) + (float)(i % 8) * 9.f, C(12) + (float)(i / 8) * 9.f });
+			const float tx = 620.f, ty = 468.f, R = 12.f;  // the target sits in the corner, inside both clearance zones
+			*enteredWall = 0; *maxX = 0.f; *maxY = 0.f;
+			for (int step = 0; step < 3000; ++step)
+			{
+				s.crowd.Clear();
+				for (int i = 0; i < N; ++i) { Agent a; a.id = i + 1; a.x = u[i].x; a.y = u[i].y; a.r = 14.f; s.crowd.Add(a); }
+				s.crowd.Rebuild();
+				for (int i = 0; i < N; ++i)
+				{
+					Sample sm = s.Query(u[i].x, u[i].y, tx, ty, R);
+					Vec2 push = s.crowd.Separation(*s.crowd.Find(i + 1));
+					if (guard) ApplyCrowd(s.grid, R, u[i].x, u[i].y, sm, push); else ApplySeparation(sm, push);
+					u[i].x += sm.vec.x * 2.f; u[i].y += sm.vec.y * 2.f;
+					if (s.grid.IsRawBlocked(s.grid.CellX(u[i].x), s.grid.CellY(u[i].y))) ++*enteredWall;
+					*maxX = (std::max)(*maxX, u[i].x); *maxY = (std::max)(*maxY, u[i].y);
+				}
+			}
+		};
+		int in0, in1; float mx0, my0, mx1, my1; run(false, &in0, &mx0, &my0); run(true, &in1, &mx1, &my1);
+		printf("      30 units in a corner pocket (walls at x = 640 and y = 480): without the guard %d steps inside walls (furthest %.0f, %.0f); with it %d (furthest %.0f, %.0f)\n", in0, mx0, my0, in1, mx1, my1);
+		CHECK(in0 > 0, "(the scenario is a real test: without the guard units do end up inside the walls)");
+		CHECK(in1 == 0, "with the guard crowd pushes never carry a unit into a wall");
+		CHECK(mx1 <= 640.f - 6.f && my1 <= 480.f - 6.f, "with the guard units keep clear of both walls while crowding");
+	}
+	// 21) Debug images: PNG encoding and what the picture shows.
+	{
+		const char* crcIn = "123456789"; const char* adIn = "Wikipedia";
+		CHECK(Crc32((const std::uint8_t*)crcIn, 9) == 0xCBF43926u, "CRC-32 matches the standard check value");
+		CHECK(Adler32((const std::uint8_t*)adIn, 9) == 0x11E60398u, "Adler-32 matches the standard check value");
+		System s; s.ResizeGrid(10, 8, 16.f, 0, 0); Block(s, 3, 3, 3, 3);
+		s.grid.AddPointZone(C(8), C(5), 40.f); s.grid.Refresh();
+		std::vector<DebugRect> rects = { DebugRect{ 100.f, 90.f, 130.f, 120.f, Rgba{ 160, 0, 0, 255 } } };
+		std::vector<DebugCircle> circles = { DebugCircle{ 80.f, 64.f, 30.f, Rgba{ 0, 200, 255, 255 } } };
+		DebugImage img = RenderDebugImage(s.grid, 24.f, true, rects, circles);
+		auto px = [&](int x, int y) { return &img.rgba[((size_t)y * img.width + x) * 4]; };
+		CHECK(img.width == 160 && img.height == 128, "image is one pixel per frame pixel when the grid is small");
+		CHECK(px(56, 56)[0] == 220 && px(56, 56)[3] == 170, "obstacle cells are drawn red");
+		CHECK(px(72, 56)[0] == 255 && px(72, 56)[1] == 140 && px(72, 56)[3] == 150, "cells too close to the wall for the radius are drawn orange");
+		CHECK(px(8 + 3, 8 + 3)[3] == 0, "free cells far from everything stay transparent");
+		CHECK(px(8 * 16 + 5, 5 * 16 + 5)[2] > 200 && px(8 * 16 + 5, 5 * 16 + 5)[3] > 100, "areas to avoid are drawn blue");
+		CHECK(px(110, 64)[1] == 200 && px(110, 64)[2] == 255, "the radius circle is drawn");
+		CHECK(px(115, 90)[0] == 160, "bounding rectangles are drawn");
+		std::vector<std::uint8_t> png = EncodePng(img.width, img.height, img.rgba);
+		CHECK(png.size() > 100 && png[0] == 0x89 && png[1] == 'P' && png[2] == 'N' && png[3] == 'G', "PNG data starts with the PNG signature");
+		FILE* f = fopen("/tmp/fp_debug_test.png", "wb"); if (f) { fwrite(png.data(), 1, png.size(), f); fclose(f); }
+		System big; big.ResizeGrid(512, 512, 16.f, 0, 0);
+		DebugImage bigImg = RenderDebugImage(big.grid, 0.f, false, {}, {});
+		CHECK((double)bigImg.width * bigImg.height <= 4.1e6, "a huge frame is shrunk so the image stays small");
 	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{

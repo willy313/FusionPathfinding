@@ -56,9 +56,23 @@ Obstacles block. Areas to avoid only **cost extra**: units go round them when th
 Areas are part of the shared fields, so they suit things that do not move much. **Do not add the objects you are steering as areas to avoid** (the enemies themselves): each enemy would be pushed away from its own area. Use the next section for that.
 
 ## Objects keeping their distance from each other (crowds)
-`Make Enemy keep their distance from each other, personal space 8 px` is set once. From then on every enemy instance (also ones created later) pushes its neighbours apart whenever `Direction(...)` is asked for it, and never pushes itself. Personal space is the gap between bodies they try to keep. Body size comes from the object's image, as for pathfinding. Only `Direction` (the Fixed-value version) includes this push. `Stop all objects keeping their distance` switches it off.
+`Make Enemy keep their distance from each other, personal space radius 14 px` is set once. From then on every enemy instance (also ones created later) pushes its neighbours apart whenever `Direction(...)` is asked for it, and never pushes itself.
+
+**Personal space is a circle around the object's centre (its hotspot)**, not an extra margin around its whole body. Two objects start pushing each other when their circles touch, and may overlap a little (about a third of the circle) when something pulls them together, such as chasing the same target. With a radius of `0` the largest circle that fits inside the object's image is used. A circle smaller than the object lets bodies overlap more; a larger one keeps them further apart.
+
+The push never drives a unit into a wall: near walls the part of the direction that points at the wall is removed. `Stop all objects keeping their distance` switches it off. Only `Direction` (the Fixed-value version) includes the push.
 
 Crowded corridors can still jam: avoidance nudges units apart, it does not plan routes for a queue.
+
+## Debug images
+Two actions write a transparent PNG that lines up with the frame (when the grid starts at 0,0), so you can see how the extension interprets your scene. Show it over the game with an **Active Picture** object: *Load picture from file*, then place it at 0,0 above your other layers.
+
+| Action | Shows |
+|---|---|
+| Debug: save an image of the grid | Obstacles in red, areas to avoid in blue (darker = stronger), and the cell grid |
+| Debug: save an image of the boundary of (object) | What objects of that size see: **orange** = cells their hotspot cannot enter, **yellow** = the zone where paths cost extra near walls, red and blue as above. For each selected object: a **cyan circle** for its pathfinding size, a **green circle** for its personal space (if it keeps its distance from others), its bounding box in dark red and its hotspot as a magenta cross |
+
+The images are snapshots: call the action again to refresh it. Very large frames are shrunk so the picture stays small. Relative file names are relative to the application's folder.
 
 ## Expressions
 | Expression | Meaning |
@@ -83,7 +97,7 @@ Show these in a String or Counter object for the object you are testing:
 - `HasPath("Flow Field Pathfinding", Fixed("Enemy"), Fixed("Player"))`: 0 means the extension sees no route (walls, or a gap too narrow for the object).
 - `BlockedCells("Flow Field Pathfinding")`: roughly the number of cells your walls cover. Far too many or too few points at the obstacle import.
 - `IsBlocked("Flow Field Pathfinding", X("Enemy"), Y("Enemy"))`: 1 means the enemy's hotspot is inside an obstacle.
-- Enemy still touches walls: check that the hotspot is centred and the image size matches the object. Use `DirectionAt` with a larger radius for a bigger margin.
+- Enemy still touches walls: save a boundary image for it (see Debug images) and check that the cyan circle covers the whole body. If not, the hotspot is probably off-centre or the image size does not match the object. Use `DirectionAt` with a larger radius for a bigger margin.
 
 ## For developers
 - The core is plain C++ in `src/FlowField.hpp`. `test/test_flowfield.cpp` and `test/test_body.cpp` run in the "core-tests" CI job (or locally: `g++ -std=c++17 test/test_flowfield.cpp`). `test_body.cpp` simulates a round-bodied unit that stops when it touches a wall, like a Fusion sprite, and checks it always reaches its target.

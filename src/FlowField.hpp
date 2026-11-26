@@ -102,22 +102,19 @@ namespace FlowPath
 		// Obstacle test for a mover of the given radius (cells outside the grid count as blocked).
 		bool BlockedFor(int idx, float radius) const { return raw[idx] != 0 || (radius > 0.f && edge[idx] < radius); }
 		bool IsBlockedFor(int cx, int cy, float radius) const { return !InBounds(cx, cy) || BlockedFor(Index(cx, cy), radius); }
-		// Traversal cost multiplier (>= 1) for a mover of the given radius: wall clearance plus areas to avoid.
-		float SlowFor(int idx, float radius) const
+		// Extra traversal cost near walls for a mover of the given radius (0 outside the soft zone).
+		float WallExtraFor(int idx, float radius) const
 		{
-			float s = 1.f;
-			if (radius > 0.f)
-			{
-				const float e = edge[idx];
-				if (e < 2.f * radius && e >= radius)
-				{
-					const float t = 1.f - (e - radius) / radius;
-					s += SoftCost * t * t;
-				}
-			}
-			if (!soft.empty()) s += soft[idx];
-			return s;
+			if (radius <= 0.f) return 0.f;
+			const float e = edge[idx];
+			if (e >= 2.f * radius || e < radius) return 0.f;
+			const float t = 1.f - (e - radius) / radius;
+			return SoftCost * t * t;
 		}
+		// Extra traversal cost from the areas to avoid.
+		float AreaExtraFor(int idx) const { return soft.empty() ? 0.f : soft[idx]; }
+		// Traversal cost multiplier (>= 1) for a mover of the given radius: wall clearance plus areas to avoid.
+		float SlowFor(int idx, float radius) const { return 1.f + WallExtraFor(idx, radius) + AreaExtraFor(idx); }
 
 		// World rectangle [x0,x1) x [y0,y1) -> the cells it overlaps (clamped to the grid; invalid if none).
 		CellRect RectToCells(float x0, float y0, float x1, float y1) const
@@ -567,9 +564,9 @@ namespace FlowPath
 	}
 
 	// ---- Crowd avoidance ---------------------------------------------------------------------------------------
-	// A mover that takes part in crowd avoidance. Positions are hotspot positions, r is the body radius and space is
-	// the extra gap the mover tries to keep from others.
-	struct Agent { int id = 0; float x = 0.f, y = 0.f, r = 0.f, space = 0.f; };
+	// A mover that takes part in crowd avoidance. Positions are hotspot positions and r is its personal space: a circle
+	// around the hotspot (not around the whole body), so bodies may overlap a little before they push each other.
+	struct Agent { int id = 0; float x = 0.f, y = 0.f, r = 0.f; };
 
 	// All agents of this tick in a spatial hash, so "who is near me?" costs a handful of lookups.
 	class Crowd
@@ -584,7 +581,7 @@ namespace FlowPath
 		{
 			index.clear(); buckets.clear();
 			maxExtent = 0.f;
-			for (const Agent& a : agents) maxExtent = (std::max)(maxExtent, a.r + a.space);
+			for (const Agent& a : agents) maxExtent = (std::max)(maxExtent, a.r);
 			bucketSize = (std::max)(32.f, 2.f * maxExtent);
 			for (size_t i = 0; i < agents.size(); ++i)
 			{
@@ -599,11 +596,12 @@ namespace FlowPath
 		}
 
 		// Sum of pushes away from everybody overlapping the agent's personal space (itself excluded). Each push has a
-		// length of 0 (just touching the personal space) to 3 (on top of each other).
+		// length of 0 (circles just touching) to 3 (on top of each other). Circles may overlap a little: a unit that is
+		// pulled towards its target settles at about two thirds of the touching distance.
 		Vec2 Separation(const Agent& self) const
 		{
 			Vec2 push;
-			const float reach = self.r + self.space + maxExtent;
+			const float reach = self.r + maxExtent;
 			const int rings = (int)std::ceil(reach / bucketSize);
 			const int bx = BX(self.x), by = BX(self.y);
 			for (int j = -rings; j <= rings; ++j)
@@ -615,13 +613,12 @@ namespace FlowPath
 					{
 						const Agent& o = agents[k];
 						if (o.id == self.id) continue;
-						const float range = self.r + o.r + (std::max)(self.space, o.space);
+						const float range = self.r + o.r; // personal-space circles touch at this distance
 						const float dx = self.x - o.x, dy = self.y - o.y;
 						const float d = std::sqrt(dx * dx + dy * dy);
 						if (d >= range) continue;
 						float strength = 1.f - d / range;
-						const float body = self.r + o.r;
-						if (d < body) strength += 2.f * (1.f - d / body); // overlapping bodies: push much harder
+						if (d < 0.5f * range) strength += 2.f * (1.f - d / (0.5f * range)); // deep overlap: push much harder
 						if (d > 1e-3f) { push.x += dx / d * strength; push.y += dy / d * strength; }
 						else
 						{
@@ -654,6 +651,202 @@ namespace FlowPath
 		vx += push.x * gain; vy += push.y * gain;
 		const float len = std::sqrt(vx * vx + vy * vy);
 		if (len > 1e-6f) s.vec = { vx / len, vy / len };
+	}
+
+
+	// Distance from a position to the nearest obstacle edge (bilinear over the cell centres; Inf if there are no obstacles).
+	inline float EdgeDistanceAt(const Grid& g, float x, float y)
+	{
+		const float fx = (std::min)((std::max)((x - g.originX) / g.cellSize - 0.5f, 0.f), (float)(g.width - 1));
+		const float fy = (std::min)((std::max)((y - g.originY) / g.cellSize - 0.5f, 0.f), (float)(g.height - 1));
+		const int x0 = (int)std::floor(fx), y0 = (int)std::floor(fy);
+		const int x1 = (std::min)(x0 + 1, g.width - 1), y1 = (std::min)(y0 + 1, g.height - 1);
+		const float tx = fx - x0, ty = fy - y0;
+		const float a = g.edge[g.Index(x0, y0)], b = g.edge[g.Index(x1, y0)], c = g.edge[g.Index(x0, y1)], d = g.edge[g.Index(x1, y1)];
+		if (a == Inf || b == Inf || c == Inf || d == Inf) return Inf;
+		return (a * (1.f - tx) + b * tx) * (1.f - ty) + (c * (1.f - tx) + d * tx) * ty;
+	}
+
+	// Keeps a direction from heading into a wall: inside the wall clearance zone the part of the direction that points
+	// at the wall is taken away (fully in the hard core, fading out towards the edge of the soft zone).
+	inline void ApplyWallGuard(const Grid& g, float radius, float x, float y, Sample& s)
+	{
+		if (!s.reachable || (s.vec.x == 0.f && s.vec.y == 0.f)) return;
+		const float e = EdgeDistanceAt(g, x, y);
+		const float zone = 2.f * radius + g.cellSize * 0.5f;
+		if (e >= zone) return;
+		const float h = g.cellSize * 0.5f;
+		float nx = EdgeDistanceAt(g, x + h, y) - EdgeDistanceAt(g, x - h, y);
+		float ny = EdgeDistanceAt(g, x, y + h) - EdgeDistanceAt(g, x, y - h);
+		const float nl = std::sqrt(nx * nx + ny * ny);
+		if (nl < 1e-6f) return;
+		nx /= nl; ny /= nl;                       // points away from the wall
+		const float into = -(s.vec.x * nx + s.vec.y * ny);
+		if (into <= 0.f) return;                  // already heading along or away from the wall
+		const float w = e <= radius ? 1.f : (zone - e) / (zone - radius);
+		float vx = s.vec.x + nx * into * w, vy = s.vec.y + ny * into * w; // drop the into-the-wall part
+		vx += nx * 0.2f * w; vy += ny * 0.2f * w;                          // and lean slightly away from it
+		const float len = std::sqrt(vx * vx + vy * vy);
+		if (len > 1e-6f) s.vec = { vx / len, vy / len };
+	}
+
+	// Crowd avoidance as the extension applies it: blend the push away from neighbours into the path direction,
+	// then make sure the result does not head into a wall.
+	inline void ApplyCrowd(const Grid& g, float radius, float x, float y, Sample& s, Vec2 push)
+	{
+		if (push.x * push.x + push.y * push.y < 1e-8f) return;
+		ApplySeparation(s, push);
+		ApplyWallGuard(g, radius, x, y, s);
+	}
+
+
+	// ---- Debug images -------------------------------------------------------------------------------------------
+	// Draws how the grid is interpreted into a transparent RGBA image that lines up 1:1 with the frame (when the grid
+	// starts at 0,0), so it can be shown over the game with Fusion's own Active Picture.
+	struct Rgba { std::uint8_t r = 0, g = 0, b = 0, a = 0; };
+	struct DebugCircle { float x, y, r; Rgba color; };
+	struct DebugRect { float x0, y0, x1, y1; Rgba color; };
+	struct DebugImage { int width = 0, height = 0; std::vector<std::uint8_t> rgba; };
+
+	inline std::uint32_t Crc32(const std::uint8_t* data, size_t n, std::uint32_t crc = 0)
+	{
+		static std::uint32_t table[256];
+		static bool ready = false;
+		if (!ready)
+		{
+			for (std::uint32_t i = 0; i < 256; ++i)
+			{
+				std::uint32_t c = i;
+				for (int k = 0; k < 8; ++k) c = (c & 1) ? 0xEDB88320u ^ (c >> 1) : (c >> 1);
+				table[i] = c;
+			}
+			ready = true;
+		}
+		crc = ~crc;
+		for (size_t i = 0; i < n; ++i) crc = table[(crc ^ data[i]) & 0xFF] ^ (crc >> 8);
+		return ~crc;
+	}
+	inline std::uint32_t Adler32(const std::uint8_t* data, size_t n)
+	{
+		std::uint32_t a = 1, b = 0;
+		for (size_t i = 0; i < n; ++i) { a = (a + data[i]) % 65521u; b = (b + a) % 65521u; }
+		return (b << 16) | a;
+	}
+
+	// Minimal PNG writer (RGBA, 8 bit, uncompressed deflate blocks): no libraries needed.
+	inline std::vector<std::uint8_t> EncodePng(int w, int h, const std::vector<std::uint8_t>& rgba)
+	{
+		std::vector<std::uint8_t> out;
+		if (w <= 0 || h <= 0 || rgba.size() < (size_t)w * h * 4) return out;
+		auto be32 = [](std::vector<std::uint8_t>& v, std::uint32_t x) { v.push_back(x >> 24); v.push_back(x >> 16); v.push_back(x >> 8); v.push_back(x); };
+		auto chunk = [&](const char* type, const std::vector<std::uint8_t>& data) {
+			be32(out, (std::uint32_t)data.size());
+			std::vector<std::uint8_t> body(type, type + 4);
+			body.insert(body.end(), data.begin(), data.end());
+			out.insert(out.end(), body.begin(), body.end());
+			be32(out, Crc32(body.data(), body.size()));
+		};
+		const std::uint8_t sig[8] = { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A };
+		out.insert(out.end(), sig, sig + 8);
+
+		std::vector<std::uint8_t> ihdr;
+		be32(ihdr, (std::uint32_t)w); be32(ihdr, (std::uint32_t)h);
+		ihdr.push_back(8); ihdr.push_back(6); ihdr.push_back(0); ihdr.push_back(0); ihdr.push_back(0); // 8 bit RGBA
+		chunk("IHDR", ihdr);
+
+		std::vector<std::uint8_t> raw; // scanlines, each with filter byte 0
+		raw.reserve((size_t)h * (1 + (size_t)w * 4));
+		for (int y = 0; y < h; ++y)
+		{
+			raw.push_back(0);
+			raw.insert(raw.end(), rgba.begin() + (size_t)y * w * 4, rgba.begin() + (size_t)(y + 1) * w * 4);
+		}
+		std::vector<std::uint8_t> z; z.push_back(0x78); z.push_back(0x01);
+		for (size_t pos = 0; pos < raw.size();)
+		{
+			const size_t len = (std::min)((size_t)65535, raw.size() - pos);
+			z.push_back(pos + len == raw.size() ? 1 : 0);
+			z.push_back(len & 0xFF); z.push_back(len >> 8); z.push_back(~len & 0xFF); z.push_back((~len >> 8) & 0xFF);
+			z.insert(z.end(), raw.begin() + pos, raw.begin() + pos + len);
+			pos += len;
+		}
+		be32(z, Adler32(raw.data(), raw.size()));
+		chunk("IDAT", z);
+		chunk("IEND", std::vector<std::uint8_t>());
+		return out;
+	}
+
+	// radius > 0 also shows what a mover of that radius sees: cells it cannot enter and the zone that costs extra.
+	inline DebugImage RenderDebugImage(const Grid& g, float radius, bool gridLines,
+		const std::vector<DebugRect>& rects, const std::vector<DebugCircle>& circles)
+	{
+		DebugImage img;
+		const float totalW = g.width * g.cellSize, totalH = g.height * g.cellSize;
+		float scale = 1.f; // shrink very large frames so the image stays a reasonable size
+		while ((totalW / scale) * (totalH / scale) > 4.0e6f) scale += 1.f;
+		img.width = (std::max)(1, (int)std::ceil(totalW / scale));
+		img.height = (std::max)(1, (int)std::ceil(totalH / scale));
+		img.rgba.assign((size_t)img.width * img.height * 4, 0);
+
+		auto blend = [&](int x, int y, const Rgba& c) {
+			if (x < 0 || y < 0 || x >= img.width || y >= img.height) return;
+			std::uint8_t* p = &img.rgba[((size_t)y * img.width + x) * 4];
+			const float sa = c.a / 255.f, da = p[3] / 255.f, oa = sa + da * (1.f - sa);
+			if (oa <= 0.f) return;
+			p[0] = (std::uint8_t)((c.r * sa + p[0] * da * (1.f - sa)) / oa + 0.5f);
+			p[1] = (std::uint8_t)((c.g * sa + p[1] * da * (1.f - sa)) / oa + 0.5f);
+			p[2] = (std::uint8_t)((c.b * sa + p[2] * da * (1.f - sa)) / oa + 0.5f);
+			p[3] = (std::uint8_t)(oa * 255.f + 0.5f);
+		};
+		auto fill = [&](int x0, int y0, int x1, int y1, const Rgba& c) {
+			for (int y = y0; y < y1; ++y) for (int x = x0; x < x1; ++x) blend(x, y, c);
+		};
+
+		for (int cy = 0; cy < g.height; ++cy)
+			for (int cx = 0; cx < g.width; ++cx)
+			{
+				const int x0 = (int)std::floor(cx * g.cellSize / scale), y0 = (int)std::floor(cy * g.cellSize / scale);
+				const int x1 = (std::max)(x0 + 1, (int)std::floor((cx + 1) * g.cellSize / scale));
+				const int y1 = (std::max)(y0 + 1, (int)std::floor((cy + 1) * g.cellSize / scale));
+				const int idx = g.Index(cx, cy);
+				if (g.raw[idx]) fill(x0, y0, x1, y1, Rgba{ 220, 40, 40, 170 });                       // obstacle
+				else if (radius > 0.f && g.BlockedFor(idx, radius)) fill(x0, y0, x1, y1, Rgba{ 255, 140, 0, 150 }); // too close to a wall for this radius
+				else
+				{
+					const float wall = g.WallExtraFor(idx, radius);
+					if (wall > 0.01f) fill(x0, y0, x1, y1, Rgba{ 255, 215, 0, (std::uint8_t)(std::min)(130.f, 130.f * wall / Grid::SoftCost) }); // costs extra near walls
+				}
+				const float area = g.AreaExtraFor(idx);
+				if (area > 0.01f) fill(x0, y0, x1, y1, Rgba{ 40, 90, 255, (std::uint8_t)(std::min)(170.f, 170.f * area / Grid::AvoidCost) }); // area to avoid
+			}
+
+		if (gridLines && g.cellSize / scale >= 6.f)
+		{
+			const Rgba line{ 90, 90, 90, 100 };
+			for (int cx = 0; cx <= g.width; ++cx) { const int x = (int)std::floor(cx * g.cellSize / scale); fill(x, 0, x + 1, img.height, line); }
+			for (int cy = 0; cy <= g.height; ++cy) { const int y = (int)std::floor(cy * g.cellSize / scale); fill(0, y, img.width, y + 1, line); }
+		}
+		for (const DebugRect& r : rects)
+		{
+			const int x0 = (int)((r.x0 - g.originX) / scale), x1 = (int)((r.x1 - g.originX) / scale);
+			const int y0 = (int)((r.y0 - g.originY) / scale), y1 = (int)((r.y1 - g.originY) / scale);
+			fill(x0, y0, x1 + 1, y0 + 1, r.color); fill(x0, y1, x1 + 1, y1 + 1, r.color);
+			fill(x0, y0, x0 + 1, y1 + 1, r.color); fill(x1, y0, x1 + 1, y1 + 1, r.color);
+		}
+		for (const DebugCircle& c : circles)
+		{
+			const float cx = (c.x - g.originX) / scale, cy = (c.y - g.originY) / scale, rr = c.r / scale;
+			const int steps = (std::max)(48, (int)(rr * 8.f));
+			for (int i = 0; i < steps; ++i)
+			{
+				const float a = 6.2831853f * (float)i / (float)steps;
+				const int px = (int)std::lround(cx + rr * std::cos(a)), py = (int)std::lround(cy + rr * std::sin(a));
+				fill(px, py, px + 2, py + 2, c.color);
+			}
+			const Rgba cross{ 255, 0, 255, 255 }; // hotspot
+			fill((int)cx - 4, (int)cy, (int)cx + 5, (int)cy + 1, cross); fill((int)cx, (int)cy - 4, (int)cx + 1, (int)cy + 5, cross);
+		}
+		return img;
 	}
 
 	// All the fields of one extension object, created on demand and cached.

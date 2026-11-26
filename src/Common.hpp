@@ -42,3 +42,4 @@ struct EDITDATA final
 #pragma pack (pop)
 
 #include "Extension.hpp"
+#include "ObjectGeometry.hpp"
