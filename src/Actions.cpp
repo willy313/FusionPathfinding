@@ -188,8 +188,13 @@ void Extension::ClearAreasToAvoid()
 void Extension::MakeObjectsAvoidEachOther(RunObject*, int radius)
 {
 #ifdef _WIN32
-	Runtime.CancelRepeatingObjectAction();
+	// Deliberately minimal, as this usually runs in Start of Frame while Fusion is still setting up:
+	//  - no CancelRepeatingObjectAction(): the action only records the object type, so being called once per
+	//    instance is harmless (and cancelling is a fatal error if the runtime is not in the expected state);
+	//  - no walking over the instances here: Handle() collects them on the next tick.
 	const short oil = Runtime.GetOIListIndexFromObjectParam(0);
+	if (oil == -1)
+		return;
 	const float radiusPx = (float)(std::max)(radius, 0);
 
 	bool found = false;
@@ -197,7 +202,6 @@ void Extension::MakeObjectsAvoidEachOther(RunObject*, int radius)
 		if (g.oil == oil) { g.radius = radiusPx; found = true; }
 	if (!found)
 		avoidGroups.push_back({ oil, radiusPx });
-	RefreshAgents();
 #else
 	(void)radius;
 #endif

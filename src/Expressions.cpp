@@ -40,13 +40,17 @@ void Extension::RefreshAgents()
 	for (const AvoidGroup& g : avoidGroups)
 		for (auto pObj : DarkEdif::ObjectIterator(rhPtr, g.oil, DarkEdif::Selection::All))
 		{
+			if (!pObj)
+				continue;
 			HeaderObject* const ho = pObj->get_rHo();
+			if (!ho)
+				continue;
 			FlowPath::Agent a;
 			a.id = ho->GetFixedValue();
 			a.x = (float)ho->get_X();
 			a.y = (float)ho->get_Y();
 			a.r = g.radius > 0.f ? g.radius : InscribedRadius(ho); // personal space around the hotspot
-			sys.crowd.Add(a);
+			sys.crowd.Add(a); // Crowd ignores unusable values (not finite, absurd sizes)
 		}
 #endif
 	sys.crowd.Rebuild();

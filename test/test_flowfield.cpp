@@ -398,6 +398,21 @@ int main()
 		DebugImage bigImg = RenderDebugImage(big.grid, 0.f, false, {}, {});
 		CHECK((double)bigImg.width * bigImg.height <= 4.1e6, "a huge frame is shrunk so the image stays small");
 	}
+	// 22) Crowd robustness: odd objects must never stall or break the crowd.
+	{
+		Crowd c; Agent good; good.id = 1; good.x = 100.f; good.y = 100.f; good.r = 14.f;
+		Agent nan; nan.id = 2; nan.x = std::nanf(""); nan.y = 0.f; nan.r = 14.f;
+		Agent inf; inf.id = 3; inf.x = 0.f; inf.y = INFINITY; inf.r = 14.f;
+		Agent huge; huge.id = 4; huge.x = 5000.f; huge.y = 5000.f; huge.r = 1e9f;
+		Agent neg; neg.id = 5; neg.x = 110.f; neg.y = 100.f; neg.r = -50.f;
+		c.Add(good); c.Add(nan); c.Add(inf); c.Add(huge); c.Add(neg); c.Rebuild();
+		CHECK(c.agents.size() == 3, "agents with non-finite positions are dropped");
+		Vec2 p = c.Separation(*c.Find(1));
+		CHECK(std::isfinite(p.x) && std::isfinite(p.y), "separation stays finite with odd neighbours around");
+		CHECK(c.Find(4) && c.Find(4)->r <= 2048.f, "an absurd personal space is clamped");
+		Crowd empty; empty.Rebuild();
+		CHECK(empty.Find(1) == nullptr, "an empty crowd finds nobody");
+	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{
 		System s; s.ResizeGrid(512, 512, 8.f, 0, 0);

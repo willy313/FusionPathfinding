@@ -575,7 +575,14 @@ namespace FlowPath
 		std::vector<Agent> agents;
 
 		void Clear() { agents.clear(); index.clear(); buckets.clear(); }
-		void Add(const Agent& a) { agents.push_back(a); }
+		// Agents with unusable numbers (not finite, or a personal space outside 0.5 .. 2048 px) are clamped or dropped,
+		// so one odd object can never stall or crash the whole crowd.
+		void Add(Agent a)
+		{
+			if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.r)) return;
+			a.r = (std::min)((std::max)(a.r, 0.5f), 2048.f);
+			agents.push_back(a);
+		}
 		// Call once after adding this tick's agents.
 		void Rebuild()
 		{
@@ -602,7 +609,7 @@ namespace FlowPath
 		{
 			Vec2 push;
 			const float reach = self.r + maxExtent;
-			const int rings = (int)std::ceil(reach / bucketSize);
+			const int rings = (std::min)(8, (int)std::ceil(reach / bucketSize));
 			const int bx = BX(self.x), by = BX(self.y);
 			for (int j = -rings; j <= rings; ++j)
 				for (int i = -rings; i <= rings; ++i)
