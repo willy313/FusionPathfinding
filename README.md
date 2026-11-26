@@ -1,4 +1,5 @@
 # Flow Field Pathfinding for Clickteam Fusion
+NOTE: This is an AI coded extension. Made with Claude.
 
 Top-down pathfinding for many objects at once. You add your walls, then ask **which direction an object should move to reach another object**. Everything heading for the same spot shares one calculation, so it stays fast with many instances. The answer is a smooth direction, not a jump between a few fixed angles.
 
