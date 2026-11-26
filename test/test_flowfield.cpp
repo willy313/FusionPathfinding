@@ -413,6 +413,30 @@ int main()
 		Crowd empty; empty.Rebuild();
 		CHECK(empty.Find(1) == nullptr, "an empty crowd finds nobody");
 	}
+	// 23) Time-sliced builds: while a new field is still being built, units keep using the previous one.
+	{
+		System s; s.ResizeGrid(80, 60, 16.f, 0, 0); Block(s, 30, 10, 33, 45);
+		s.cellsPerFrame = 300;
+		const float R = 16.f, ax = 100.f, ay = 100.f;
+		Field* fa = s.Acquire(1100.f, 700.f, R); int guard = 0; while (!fa->ready && ++guard < 10000) s.Update();
+		Sample before = s.Query(ax, ay, 1100.f, 700.f, R);
+		Sample during = s.Query(ax, ay, 1000.f, 300.f, R); // the target moved to another cell: its field has not been built yet
+		CHECK(before.reachable && during.reachable, "while the new field is still building, the previous one keeps answering");
+		CHECK(!s.Acquire(1000.f, 300.f, R)->ready, "(the new field really was still building)");
+		guard = 0; while (!s.Acquire(1000.f, 300.f, R)->ready && ++guard < 10000) s.Update();
+		System fresh; fresh.ResizeGrid(80, 60, 16.f, 0, 0); fresh.grid.AddCells(Cells(30, 10, 33, 45), +1);
+		CHECK(std::fabs(s.Query(ax, ay, 1000.f, 300.f, R).distance - fresh.Query(ax, ay, 1000.f, 300.f, R).distance) < 1e-3f, "once built, the new field takes over with the exact answer");
+	}
+	// 24) The cache sizes itself from memory: lots of small fields, fewer large ones, never a thrash on a normal frame.
+	{
+		System s; s.ResizeGrid(80, 60, 16.f, 0, 0);
+		for (int i = 0; i < 40; ++i) s.Query(C(1), C(1), C(2 + i), C(20), 0.f);
+		CHECK(s.fields.size() == 40, "40 different targets on a normal-sized grid all stay cached");
+		System big; big.ResizeGrid(512, 512, 16.f, 0, 0);
+		for (int i = 0; i < 60; ++i) big.Query(C(1), C(1), C(2 + i), C(20), 0.f);
+		const size_t perField = 512u * 512u * 12u;
+		CHECK(big.fields.size() == (std::max)((size_t)4, (size_t)((64u << 20) / perField)) && big.fields.size() < 40, "on a huge grid the cache holds fewer fields so memory stays bounded");
+	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{
 		System s; s.ResizeGrid(512, 512, 8.f, 0, 0);

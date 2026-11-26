@@ -30,6 +30,7 @@
 
 #include <vector>
 #include <queue>
+#include <memory>
 #include <unordered_map>
 #include <cmath>
 #include <cstdint>
@@ -67,6 +68,11 @@ namespace FlowPath
 		std::unordered_map<int, SoftZone> zones; // areas to avoid, by key (an object's Fixed value, or a negative key for positions)
 		std::vector<float> soft;            // extra traversal cost per cell from the areas to avoid (empty when there are none)
 		std::uint32_t version = 0;          // bumped whenever obstacles or areas to avoid change
+		// Cost maps shared by every field of one mover size: cost[idx] = Inf where the mover cannot go, otherwise the
+		// traversal cost multiplier. Built on first use after each change, so fields read one array instead of
+		// re-deriving blocked cells and costs from several.
+		mutable std::unordered_map<int, std::shared_ptr<const std::vector<float>>> costCache;
+		mutable std::uint32_t costCacheVersion = 0;
 		bool dirty = false;                 // obstacles changed; call Refresh()
 		bool zonesDirty = false;            // areas to avoid changed; call Refresh()
 		int nextPointKey = -1000;
@@ -115,6 +121,19 @@ namespace FlowPath
 		float AreaExtraFor(int idx) const { return soft.empty() ? 0.f : soft[idx]; }
 		// Traversal cost multiplier (>= 1) for a mover of the given radius: wall clearance plus areas to avoid.
 		float SlowFor(int idx, float radius) const { return 1.f + WallExtraFor(idx, radius) + AreaExtraFor(idx); }
+
+		std::shared_ptr<const std::vector<float>> CostFor(float radius) const
+		{
+			if (costCacheVersion != version) { costCache.clear(); costCacheVersion = version; }
+			const int key = (int)std::lround(radius * 8.f);
+			auto it = costCache.find(key);
+			if (it != costCache.end()) return it->second;
+			const size_t n = (size_t)width * height;
+			auto m = std::make_shared<std::vector<float>>(n);
+			for (size_t i = 0; i < n; ++i) (*m)[i] = BlockedFor((int)i, radius) ? Inf : SlowFor((int)i, radius);
+			costCache[key] = m;
+			return m;
+		}
 
 		// World rectangle [x0,x1) x [y0,y1) -> the cells it overlaps (clamped to the grid; invalid if none).
 		CellRect RectToCells(float x0, float y0, float x1, float y1) const
@@ -249,6 +268,7 @@ namespace FlowPath
 		// Published (readable) data
 		std::vector<float> dist;  // cost-weighted distance in cells; Inf = unreachable
 		std::vector<Vec2> dir;    // unit downhill vector per cell (screen space: +x right, +y down)
+		std::shared_ptr<const std::vector<float>> cost; // the cost map this data was built with (Inf = blocked for this mover)
 		bool ready = false;       // true once a build has completed at least once
 		std::uint32_t builtGridVersion = 0;
 
@@ -258,6 +278,9 @@ namespace FlowPath
 
 		void SetTarget(int cx, int cy) { targetCX = cx; targetCY = cy; hasTarget = true; }
 		bool NeedsBuild(const Grid& g) const { return hasTarget && (!ready || builtGridVersion != g.version); }
+
+		bool BlockedAt(int idx) const { return (*cost)[idx] == Inf; }
+		bool BlockedAt(const Grid& g, int cx, int cy) const { return !g.InBounds(cx, cy) || (*cost)[g.Index(cx, cy)] == Inf; }
 
 		// Advance the build by up to maxExpansions heap pops (0 = run to completion).
 		// Returns true if the field finished building during this call.
@@ -272,24 +295,49 @@ namespace FlowPath
 			// If the obstacles changed mid-build, restart with the new ones.
 			if (buildGridVersion != g.version) StartBuild(g);
 
+			const int W = g.width, H = g.height;
+			const float* const c = buildCost->data();
+			float* const fin = final_.data();
+			float* const wk = work.data();
 			size_t n = 0;
-			const int W = g.width;
-			while (!heap.empty())
+			while (queue.Size() > 0)
 			{
 				if (maxExpansions && n >= maxExpansions) return false;
-				Node top = heap.top(); heap.pop();
-				if (state[top.i] == Accepted || top.d > work[top.i]) continue; // stale entry
-				state[top.i] = Accepted;
+				const Node top = queue.Pop();
+				const int i = top.i;
+				if (fin[i] != Inf || top.d > wk[i]) continue; // already final, or a stale queue entry
+				fin[i] = top.d;
 				++n;
-				int cx = top.i % W, cy = top.i / W;
+				const int cx = i % W, cy = i / W;
+				// the four neighbours
 				for (int k = 0; k < 4; ++k)
 				{
-					int nx = cx + DX[k], ny = cy + DY[k];
-					if (!g.InBounds(nx, ny)) continue;
-					int ni = g.Index(nx, ny);
-					if (g.BlockedFor(ni, radius) || state[ni] == Accepted) continue;
-					float nd = Solve(g, nx, ny);
-					if (nd < work[ni]) { work[ni] = nd; heap.push({ nd, ni }); }
+					int ni;
+					switch (k)
+					{
+					case 0: if (cx + 1 >= W) continue; ni = i + 1; break;
+					case 1: if (cx == 0) continue; ni = i - 1; break;
+					case 2: if (cy + 1 >= H) continue; ni = i + W; break;
+					default: if (cy == 0) continue; ni = i - W; break;
+					}
+					const float s = c[ni];
+					if (s == Inf || fin[ni] != Inf) continue; // blocked, or already final
+					// First-order upwind solve of |grad T| = s from the final values of the orthogonal neighbours
+					const int nx = ni % W, ny = ni / W;
+					float ax = Inf, ay = Inf;
+					if (nx > 0) ax = fin[ni - 1];
+					if (nx + 1 < W) ax = (std::min)(ax, fin[ni + 1]);
+					if (ny > 0) ay = fin[ni - W];
+					if (ny + 1 < H) ay = (std::min)(ay, fin[ni + W]);
+					float nd;
+					if (ax == Inf) nd = ay + s;
+					else if (ay == Inf) nd = ax + s;
+					else
+					{
+						const float diff = std::fabs(ax - ay);
+						nd = diff >= s ? (std::min)(ax, ay) + s : (ax + ay + std::sqrt(2.f * s * s - diff * diff)) * 0.5f;
+					}
+					if (nd < wk[ni]) { wk[ni] = nd; queue.Push({ nd, ni }); }
 				}
 			}
 			Finish(g);
@@ -298,53 +346,73 @@ namespace FlowPath
 
 	private:
 		struct Node { float d; int i; };
-		struct Cmp { bool operator()(const Node& a, const Node& b) const { return a.d > b.d; } };
-		static constexpr int DX[4] = { 1, -1, 0, 0 };
-		static constexpr int DY[4] = { 0, 0, 1, -1 };
 
-		enum : std::uint8_t { Far = 0, Accepted = 2 };
-		std::vector<std::uint8_t> state;
-		std::vector<float> work;
-		std::priority_queue<Node, std::vector<Node>, Cmp> heap;
-
-		// First-order upwind solve of |grad T| = s (s = local traversal cost) using accepted orthogonal neighbours.
-		float Solve(const Grid& g, int cx, int cy) const
+		// Bucket queue (Dial's algorithm): nodes are sorted into narrow distance buckets, so push and pop cost O(1)
+		// instead of O(log n) for a heap. Nodes within one bucket come out in arbitrary order, which bounds the
+		// distance error by the bucket width (0.02 of a cell), far below what steering can notice. Only a window of
+		// buckets is alive at once (a step never costs more than the largest cell cost), so the buckets are reused
+		// in a ring.
+		class BucketQueue
 		{
-			auto acc = [&](int x, int y) -> float {
-				if (!g.InBounds(x, y)) return Inf;
-				int i = g.Index(x, y);
-				return state[i] == Accepted ? work[i] : Inf;
-			};
-			const float s = g.SlowFor(g.Index(cx, cy), radius);
-			const float ax = (std::min)(acc(cx - 1, cy), acc(cx + 1, cy));
-			const float ay = (std::min)(acc(cx, cy - 1), acc(cx, cy + 1));
-			if (ax == Inf && ay == Inf) return Inf;
-			if (ax == Inf) return ay + s;
-			if (ay == Inf) return ax + s;
-			const float diff = std::fabs(ax - ay);
-			if (diff >= s) return (std::min)(ax, ay) + s;
-			return (ax + ay + std::sqrt(2.f * s * s - diff * diff)) * 0.5f;
-		}
+		public:
+			static constexpr float Width = 0.02f;
+			void Reset(float maxStep)
+			{
+				ringSize = (size_t)std::ceil(maxStep / Width) + 3;
+				if (buckets.size() < ringSize) buckets.resize(ringSize);
+				for (size_t i = 0; i < ringSize; ++i) buckets[i].clear();
+				cur = 0; size = 0;
+			}
+			size_t Size() const { return size; }
+			void Push(const Node& n)
+			{
+				size_t a = (size_t)(n.d / Width);
+				if (a < cur) a = cur;                // never behind the bucket being emptied
+				buckets[a % ringSize].push_back(n);
+				++size;
+			}
+			Node Pop()
+			{
+				while (buckets[cur % ringSize].empty()) ++cur;
+				std::vector<Node>& b = buckets[cur % ringSize];
+				const Node n = b.back(); b.pop_back();
+				--size;
+				return n;
+			}
+		private:
+			std::vector<std::vector<Node>> buckets;
+			size_t ringSize = 1, cur = 0, size = 0;
+		};
+
+		std::shared_ptr<const std::vector<float>> buildCost;
+		std::vector<float> final_;   // values that are settled (Inf until a cell is reached)
+		std::vector<float> work;     // best tentative values
+		BucketQueue queue;
 
 		void StartBuild(const Grid& g)
 		{
 			building = true;
 			buildGridVersion = g.version;
-			work.assign((size_t)g.width * g.height, Inf);
-			state.assign((size_t)g.width * g.height, Far);
-			heap = decltype(heap)();
+			buildCost = g.CostFor(radius);
+			const size_t n = (size_t)g.width * g.height;
+			work.assign(n, Inf);
+			final_.assign(n, Inf);
+			float maxStep = 1.f;
+			for (float v : *buildCost) if (v != Inf && v > maxStep) maxStep = v;
+			queue.Reset(maxStep);
 			// If the target cell itself is blocked (e.g. the player stands inside a wall), grow from the nearest free cell.
 			int sx = targetCX, sy = targetCY;
-			if (g.IsBlockedFor(sx, sy, radius)) NearestFree(g, sx, sy);
+			const std::vector<float>& c = *buildCost;
+			if (!g.InBounds(sx, sy) || c[g.Index(sx, sy)] == Inf) NearestFree(g, c, sx, sy);
 			startCX = sx; startCY = sy;
-			if (g.InBounds(sx, sy) && !g.BlockedFor(g.Index(sx, sy), radius))
+			if (g.InBounds(sx, sy) && c[g.Index(sx, sy)] != Inf)
 			{
 				work[g.Index(sx, sy)] = 0.f;
-				heap.push({ 0.f, g.Index(sx, sy) });
+				queue.Push({ 0.f, g.Index(sx, sy) });
 			}
 		}
 
-		void NearestFree(const Grid& g, int& cx, int& cy) const
+		static void NearestFree(const Grid& g, const std::vector<float>& c, int& cx, int& cy)
 		{
 			int bx = (std::min)((std::max)(cx, 0), g.width - 1), by = (std::min)((std::max)(cy, 0), g.height - 1);
 			int maxR = (std::max)(g.width, g.height);
@@ -353,16 +421,16 @@ namespace FlowPath
 					for (int x = bx - r; x <= bx + r; ++x)
 					{
 						if ((std::max)(std::abs(x - bx), std::abs(y - by)) != r) continue;
-						if (g.InBounds(x, y) && !g.BlockedFor(g.Index(x, y), radius)) { cx = x; cy = y; return; }
+						if (g.InBounds(x, y) && c[g.Index(x, y)] != Inf) { cx = x; cy = y; return; }
 					}
 			cx = -1; cy = -1;
 		}
 
 		void Finish(const Grid& g)
 		{
-			dist.swap(work);
-			work.clear();
-			state.clear();
+			dist.swap(final_);
+			final_.clear(); work.clear();
+			cost = buildCost;
 			building = false;
 			builtGridVersion = buildGridVersion;
 			ready = true;
@@ -373,21 +441,20 @@ namespace FlowPath
 		{
 			const int W = g.width, H = g.height;
 			dir.assign((size_t)W * H, Vec2{});
-			auto val = [&](int x, int y, float& out) -> bool {
-				if (!g.InBounds(x, y)) return false;
-				int i = g.Index(x, y);
-				if (g.BlockedFor(i, radius) || dist[i] == Inf) return false;
-				out = dist[i]; return true;
-			};
+			const float* const c = cost->data();
+			const float* const T = dist.data();
 			for (int cy = 0; cy < H; ++cy)
 				for (int cx = 0; cx < W; ++cx)
 				{
-					int i = g.Index(cx, cy);
-					float d = dist[i];
-					if (g.BlockedFor(i, radius) || d == Inf || d == 0.f) continue;
+					const int i = cy * W + cx;
+					const float d = T[i];
+					if (c[i] == Inf || d == Inf || d == 0.f) continue;
+					// neighbour values (usable = free for this mover and reachable)
 					float l = 0, r = 0, u = 0, dn = 0;
-					bool hl = val(cx - 1, cy, l), hr = val(cx + 1, cy, r);
-					bool hu = val(cx, cy - 1, u), hd = val(cx, cy + 1, dn);
+					const bool hl = cx > 0 && c[i - 1] != Inf && T[i - 1] != Inf && ((l = T[i - 1]), true);
+					const bool hr = cx + 1 < W && c[i + 1] != Inf && T[i + 1] != Inf && ((r = T[i + 1]), true);
+					const bool hu = cy > 0 && c[i - W] != Inf && T[i - W] != Inf && ((u = T[i - W]), true);
+					const bool hd = cy + 1 < H && c[i + W] != Inf && T[i + W] != Inf && ((dn = T[i + W]), true);
 					// Smooth gradient (central differences where possible).
 					float gx = 0.f, gy = 0.f;
 					if (hl && hr) gx = (r - l) * 0.5f; else if (hr) gx = r - d; else if (hl) gx = d - l;
@@ -413,7 +480,7 @@ namespace FlowPath
 						if (std::fabs(ddy) > 0.25f * cl) uphill |= ddy > 0.f ? !(hd && dn < d) : !(hu && u < d);
 					}
 					if (cl < 0.3f * sl || uphill) { gx = sx; gy = sy; }
-					float len = std::sqrt(gx * gx + gy * gy);
+					const float len = std::sqrt(gx * gx + gy * gy);
 					if (len > 1e-6f) dir[i] = { -gx / len, -gy / len };
 				}
 		}
@@ -440,7 +507,7 @@ namespace FlowPath
 					if ((std::max)(std::abs(x - bx), std::abs(y - by)) != r) continue;
 					if (!g.InBounds(x, y)) continue;
 					int i = g.Index(x, y);
-					if (!g.BlockedFor(i, f.radius) && f.dist[i] != Inf) { cx = x; cy = y; return true; }
+					if (!f.BlockedAt(i) && f.dist[i] != Inf) { cx = x; cy = y; return true; }
 				}
 		return false;
 	}
@@ -476,7 +543,7 @@ namespace FlowPath
 				int cx = x0 + i, cy = y0 + j;
 				if (!g.InBounds(cx, cy)) continue;
 				int idx = g.Index(cx, cy);
-				if (g.BlockedFor(idx, f.radius) || f.dist[idx] == Inf) continue;
+				if (f.BlockedAt(idx) || f.dist[idx] == Inf) continue;
 				float w = (i ? tfx : 1.f - tfx) * (j ? tfy : 1.f - tfy);
 				if (w <= 0.f) continue;
 				vx += f.dir[idx].x * w; vy += f.dir[idx].y * w;
@@ -490,7 +557,7 @@ namespace FlowPath
 		//  - only clipping a wall edge (some neighbours usable): keep following the path and add a gentle push out,
 		//    so a unit that grazes a corner is nudged away instead of being thrown back and forth.
 		const bool deep = wsum <= 1e-6f;
-		const bool inside = deep || g.IsBlockedFor(g.CellX(wx), g.CellY(wy), f.radius);
+		const bool inside = deep || f.BlockedAt(g, g.CellX(wx), g.CellY(wy));
 		if (inside)
 		{
 			int cx = g.CellX(wx), cy = g.CellY(wy);
@@ -864,7 +931,8 @@ namespace FlowPath
 		Crowd crowd;                           // objects that keep their distance from each other (refreshed every tick)
 		std::unordered_map<std::uint64_t, Field> fields;
 		std::uint64_t tick = 0;
-		std::size_t maxFields = 16;            // cache size; the least recently used field is dropped first
+		std::size_t maxFields = 0;             // cache size; 0 = automatic (as many as fit in memoryBudget). The least recently used goes first
+		std::size_t memoryBudget = 64u << 20;  // bytes the cached fields may use when maxFields is automatic
 		std::uint64_t idleTicks = 600;         // fields unused for this many updates are dropped
 		std::size_t cellsPerFrame = 0;         // 0 = build fields completely the moment they are asked for
 
@@ -880,32 +948,38 @@ namespace FlowPath
 		// With cellsPerFrame == 0 the field is complete when this returns; otherwise it may still be building.
 		Field* Acquire(float tx, float ty, float radiusPx)
 		{
-			grid.Refresh();
-			int cls; float snapped;
-			SizeClass(radiusPx, cls, snapped);
-			const int cx = (std::min)((std::max)(grid.CellX(tx), 0), grid.width - 1);
-			const int cy = (std::min)((std::max)(grid.CellY(ty), 0), grid.height - 1);
-			const std::uint64_t key = ((std::uint64_t)cls << 44) | ((std::uint64_t)cy << 22) | (std::uint64_t)cx;
-			auto it = fields.find(key);
-			if (it == fields.end())
-			{
-				if (fields.size() >= maxFields) EvictOldest();
-				it = fields.emplace(key, Field()).first;
-				it->second.SetTarget(cx, cy);
-				it->second.radius = snapped;
-			}
-			Field& f = it->second;
-			f.lastUsed = tick;
-			if (cellsPerFrame == 0) f.Step(grid, 0);
-			return &f;
+			std::uint64_t key; int cls;
+			return Find(tx, ty, radiusPx, key, cls);
 		}
 
 		// Which way (and how far) from A to B for a mover of the given radius.
 		Sample Query(float ax, float ay, float bx, float by, float radiusPx)
 		{
-			Field* f = Acquire(bx, by, radiusPx);
-			if (!f->ready) return Sample();
-			return SampleField(grid, *f, ax, ay, bx, by);
+			std::uint64_t key; int cls;
+			Field* f = Find(bx, by, radiusPx, key, cls);
+			if (f->ready)
+			{
+				lastReady[cls] = key;
+				return SampleField(grid, *f, ax, ay, bx, by);
+			}
+			// Still being built over several frames (cellsPerFrame): keep steering with the previous field of this
+			// size, a few cells out of date, rather than leaving everybody without a direction.
+			auto prev = lastReady.find(cls);
+			if (prev != lastReady.end())
+			{
+				auto old = fields.find(prev->second);
+				if (old != fields.end() && old->second.ready)
+					return SampleField(grid, old->second, ax, ay, bx, by);
+			}
+			return Sample();
+		}
+
+		// How many fields the cache may hold for the current grid.
+		std::size_t FieldLimit() const
+		{
+			if (maxFields) return maxFields;
+			const std::size_t perField = (std::size_t)grid.width * grid.height * 12; // distance (4 B) + direction (8 B) per cell
+			return (std::min)((std::size_t)256, (std::max)((std::size_t)4, perField ? memoryBudget / perField : (std::size_t)256));
 		}
 
 		// Call once per tick: ages the cache and continues builds within the per-frame budget.
@@ -932,9 +1006,34 @@ namespace FlowPath
 		{
 			grid.Resize(w, h, cell, ox, oy);
 			fields.clear();
+			lastReady.clear();
 		}
 
 	private:
+		std::unordered_map<int, std::uint64_t> lastReady; // size class -> key of the field last answered from
+
+		Field* Find(float tx, float ty, float radiusPx, std::uint64_t& key, int& cls)
+		{
+			grid.Refresh();
+			float snapped;
+			SizeClass(radiusPx, cls, snapped);
+			const int cx = (std::min)((std::max)(grid.CellX(tx), 0), grid.width - 1);
+			const int cy = (std::min)((std::max)(grid.CellY(ty), 0), grid.height - 1);
+			key = ((std::uint64_t)cls << 44) | ((std::uint64_t)cy << 22) | (std::uint64_t)cx;
+			auto it = fields.find(key);
+			if (it == fields.end())
+			{
+				while (fields.size() >= FieldLimit() && !fields.empty()) EvictOldest();
+				it = fields.emplace(key, Field()).first;
+				it->second.SetTarget(cx, cy);
+				it->second.radius = snapped;
+			}
+			Field& f = it->second;
+			f.lastUsed = tick;
+			if (cellsPerFrame == 0) f.Step(grid, 0);
+			return &f;
+		}
+
 		void EvictOldest()
 		{
 			auto oldest = fields.begin();
