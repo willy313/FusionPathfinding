@@ -50,6 +50,8 @@ public:
 	// ======================================
 	FlowPath::System sys;
 	bool pendingStartImport = false;   // import Fusion obstacles on the first Handle()
+	int importPrecision = 0;           // 0 = a cell is blocked if any part of it touches an obstacle; 1 = only if its central half does
+	int sizePercent = 100;             // pathfinding size of objects as a percentage of their own size
 	// Objects added as obstacles: Fixed value -> the cells they cover, so they can be moved or removed exactly.
 	std::unordered_map<int, FlowPath::CellRect> objectObstacles;
 	// Object types whose instances keep their distance from each other (see Crowd in FlowField.hpp)
@@ -61,6 +63,7 @@ public:
 	bool Resolve(int fixedValue, float& x, float& y, float& radius, int* currentDirection = nullptr);
 	void ApplyObjectObstacles(bool add);
 	void ImportFusionObstacles(int layer);
+	void ImportCells(int layer, const FlowPath::CellRect& cells, bool clearFirst);
 	void ApplyObjectZones(bool add, int padding);
 	void RefreshAgents(); // rebuilds the crowd from the current positions of all avoiding objects
 
@@ -79,11 +82,18 @@ public:
 	void MakeObjectsAvoidEachOther(RunObject* obj, int space);
 	void StopObjectsAvoidingEachOther();
 	void SetCellsPerFrame(int cells);
+	void RescanFusionObstaclesInArea(int x, int y, int width, int height, int layer);
+	void RescanAllFusionObstacles();
+	void SetFusionObstaclePrecision(int precision);
+	void SetPathfindingSizePercent(int percent);
+	void SetLogFile(const TCHAR* path);
 	void DebugSaveGridImage(const TCHAR* path);
 	void DebugSaveBoundaryImage(RunObject* obj, const TCHAR* path);
 
 	// Conditions
 	bool PositionIsBlocked(int x, int y);
+	bool PathBetweenObjectsIsClear(int objectListA, int fixedB);
+	bool PathBetweenPositionsIsClear(int ax, int ay, int bx, int by, int radius);
 
 	// Expressions
 	float Direction(int fixedA, int fixedB, int directions);
@@ -98,6 +108,8 @@ public:
 	int CellSize();
 	int BlockedCells();
 	int CachedTargets();
+	const TCHAR* LastError();
+	const TCHAR* LogPath();
 
 	// Runs every tick of Fusion's runtime, can be toggled off and back on
 	REFLAG Handle();

@@ -45,6 +45,18 @@
 				[
 					6,
 					"Remove objects from obstacles"
+				],
+				[
+					16,
+					"Rescan Fusion obstacles in an area"
+				],
+				[
+					17,
+					"Rescan all Fusion obstacles"
+				],
+				[
+					18,
+					"Set Fusion obstacle precision"
 				]
 			],
 			[
@@ -94,12 +106,31 @@
 					15,
 					"Debug: save boundary image"
 				]
+			],
+			[
+				"Size and logging",
+				[
+					19,
+					"Set pathfinding size of objects"
+				],
+				[
+					20,
+					"Set log file"
+				]
 			]
 		],
 		"ConditionMenu": [
 			[
 				0,
 				"Position is inside an obstacle"
+			],
+			[
+				1,
+				"Path between objects is clear"
+			],
+			[
+				2,
+				"Path between positions is clear"
 			]
 		],
 		"ExpressionMenu": [
@@ -126,11 +157,11 @@
 				],
 				[
 					4,
-					"Is there a path between objects?"
+					"Is the path between objects clear?"
 				],
 				[
 					5,
-					"Is there a path between positions?"
+					"Is the path between positions clear?"
 				]
 			],
 			[
@@ -158,6 +189,17 @@
 				[
 					11,
 					"Number of cached targets"
+				]
+			],
+			[
+				"Log",
+				[
+					12,
+					"Last error written to the log"
+				],
+				[
+					13,
+					"Path of the log file"
 				]
 			]
 		],
@@ -317,6 +359,61 @@
 						"File name or path of the PNG image to write, e.g. boundary.png"
 					]
 				]
+			},
+			{
+				"Title": "Rescan Fusion obstacles in the area at (%0, %1), %2 x %3 px, layer %4",
+				"Parameters": [
+					[
+						"Integer",
+						"X of the area's top-left corner in pixels"
+					],
+					[
+						"Integer",
+						"Y of the area's top-left corner in pixels"
+					],
+					[
+						"Integer",
+						"Width of the area in pixels"
+					],
+					[
+						"Integer",
+						"Height of the area in pixels"
+					],
+					[
+						"Integer",
+						"Layer (-1 for all layers)"
+					]
+				]
+			},
+			{
+				"Title": "Rescan all Fusion obstacles"
+			},
+			{
+				"Title": "Set Fusion obstacle precision to %0",
+				"Parameters": [
+					[
+						"Integer",
+						"0 = cautious: a cell is blocked if any part of it touches an obstacle (narrows corridors). 1 = balanced: only the central half of the cell counts (keeps corridors closer to their real width)"
+					]
+				]
+			},
+			{
+				"Title": "Set pathfinding size of objects to %0 percent",
+				"Parameters": [
+					[
+						"Integer",
+						"Percent of the object's own size (100 = its own size). Lower it if corridors close although objects visibly fit; raise it to keep them further from walls"
+					]
+				]
+			},
+			{
+				"Title": "Set log file to %0",
+				"Parameters": [
+					[
+						"Text",
+						"File name or path of the log file, e.g. pathfinding.log"
+					]
+				]
 			}
 		],
 		"Conditions": [
@@ -331,6 +428,46 @@
 					[
 						"Integer",
 						"Y position in pixels"
+					]
+				]
+			},
+			{
+				"Title": "%o : Path from %0 to %1 is clear",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Object",
+						"Object(s) that want to reach the target. Each one is judged with its own size, and all of them need a clear path"
+					],
+					[
+						"Integer",
+						"Fixed value of the target object, e.g. Fixed(\"Player\")"
+					]
+				]
+			},
+			{
+				"Title": "%o : Path between (%0, %1) and (%2, %3) is clear for radius %4 px",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Integer",
+						"X of the start position"
+					],
+					[
+						"Integer",
+						"Y of the start position"
+					],
+					[
+						"Integer",
+						"X of the target position"
+					],
+					[
+						"Integer",
+						"Y of the target position"
+					],
+					[
+						"Integer",
+						"Radius of the moving object in pixels"
 					]
 				]
 			}
@@ -497,6 +634,14 @@
 			{
 				"Title": "CachedTargets(",
 				"Returns": "Integer"
+			},
+			{
+				"Title": "LastError$(",
+				"Returns": "Text"
+			},
+			{
+				"Title": "LogPath$(",
+				"Returns": "Text"
 			}
 		],
 		"Properties": [

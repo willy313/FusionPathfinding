@@ -43,3 +43,4 @@ struct EDITDATA final
 
 #include "Extension.hpp"
 #include "ObjectGeometry.hpp"
+#include "Logger.hpp"

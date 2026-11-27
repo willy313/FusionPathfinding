@@ -9,8 +9,9 @@ errors = []
 
 # function name -> (return type, [param types])
 decl = {}
-for m in re.finditer(r'^\t(void|bool|float|int)\s+(\w+)\(([^)]*)\);', hpp, re.M):
+for m in re.finditer(r'^\t(void|bool|float|int|const TCHAR\*)\s+(\w+)\(([^)]*)\);', hpp, re.M):
     ret, name, params = m.groups()
+    ret = ret.replace(' ', '')
     types = []
     for p in [x.strip() for x in params.split(',') if x.strip()]:
         t = re.sub(r'\s*\w+$', '', p).replace(' ', '')   # drop the parameter name
@@ -38,7 +39,8 @@ for kind, key, menukey in (('Action', 'Actions', 'ActionMenu'), ('Condition', 'C
         fn = links[kind].get(i)
         if fn not in decl: errors.append(f'{kind} {i}: function {fn} not declared in Extension.hpp'); continue
         ret, ptypes = decl[fn]
-        jparams = [TYPE[p[0]] for p in item.get('Parameters', [])]
+        # an Object parameter reaches an action as RunObject*, but a condition as a plain object-list number
+        jparams = [('int' if (kind == 'Condition' and p[0] == 'Object') else TYPE[p[0]]) for p in item.get('Parameters', [])]
         if jparams != ptypes: errors.append(f'{kind} {i} ({fn}): JSON params {jparams} != C++ params {ptypes}')
         want_ret = {'Action': 'void', 'Condition': 'bool'}.get(kind) or TYPE[item['Returns']]
         if ret != want_ret: errors.append(f'{kind} {i} ({fn}): return {ret}, expected {want_ret}')

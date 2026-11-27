@@ -437,6 +437,42 @@ int main()
 		const size_t perField = 512u * 512u * 12u;
 		CHECK(big.fields.size() == (std::max)((size_t)4, (size_t)((64u << 20) / perField)) && big.fields.size() < 40, "on a huge grid the cache holds fewer fields so memory stays bounded");
 	}
+	// 25) "Clear" path: it must lead to the target itself, not just to the nearest usable spot.
+	{
+		System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+		Sample open = s.Query(C(3), C(20), C(40), C(20), 16.f);
+		CHECK(open.Clear() && !open.targetBlocked, "an open path is clear");
+		Block(s, 38, 17, 42, 23);                                  // the target stands inside a wall
+		Sample inWall = s.Query(C(3), C(20), C(40), C(20), 16.f);
+		CHECK(inWall.reachable && inWall.targetBlocked && !inWall.Clear(), "a target inside a wall is approachable but the path is not clear");
+		Sample none; none.reachable = false;
+		CHECK(!none.Clear(), "no path is not clear");
+		System narrow; narrow.ResizeGrid(60, 40, 16.f, 0, 0);       // player inside a corridor too narrow for a big mover
+		narrow.grid.AddCells(Cells(0, 12, 59, 17), +1); narrow.grid.AddCells(Cells(0, 21, 59, 26), +1); // corridor of 3 cells = 48 px
+		bool smallClear = narrow.Query(C(3), C(19), C(30), C(19), 8.f).Clear();
+		bool bigClear = narrow.Query(C(3), C(31), C(30), C(19), 30.f).Clear();
+		CHECK(smallClear, "a small mover has a clear path into a 48 px corridor");
+		CHECK(!bigClear, "a large mover (radius 30) has no clear path into the same corridor");
+	}
+	// 26) Rescanning: forgetting imported obstacles in an area removes erased walls and keeps the rest.
+	{
+		System s; s.ResizeGrid(20, 20, 16.f, 0, 0);
+		for (int x = 4; x <= 12; ++x) s.grid.MarkImported(x, 10);   // a wall of imported cells
+		s.grid.AddCells(Cells(6, 10, 6, 10), +1);                    // an object also sits on one of those cells
+		s.grid.Refresh();
+		s.grid.ClearImported(s.grid.RectToCells(5 * 16.f, 9 * 16.f, 10 * 16.f, 12 * 16.f)); s.grid.Refresh();
+		CHECK(!s.grid.IsRawBlocked(5, 10) && !s.grid.IsRawBlocked(8, 10), "imported cells inside the rescanned area are forgotten");
+		CHECK(s.grid.IsRawBlocked(4, 10) && s.grid.IsRawBlocked(12, 10), "imported cells outside the area are untouched");
+		CHECK(s.grid.IsRawBlocked(6, 10), "an object added as an obstacle survives a rescan of the area under it");
+	}
+	// 27) A mover with no path is pushed apart from neighbours instead of stacking.
+	{
+		Sample none; Sample gentle = none; Vec2 hard{ 0.9f, 0.f }, light{ 0.02f, 0.f };
+		CHECK(SeparateWithoutPath(none, hard) && none.vec.x == 1.f && !none.Clear(), "neighbours push a pathless mover apart, without making the path clear");
+		CHECK(!SeparateWithoutPath(gentle, light) && !gentle.reachable, "a light touch does not move a pathless mover");
+		Sample hasPath; hasPath.reachable = true;
+		CHECK(!SeparateWithoutPath(hasPath, hard), "movers that have a path are left to the normal crowd blending");
+	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{
 		System s; s.ResizeGrid(512, 512, 8.f, 0, 0);

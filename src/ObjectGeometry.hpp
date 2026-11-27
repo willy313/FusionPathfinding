@@ -41,6 +41,12 @@ inline float RadiusOfHeader(HeaderObject* ho)
 	return (w > 0.f && h > 0.f) ? std::sqrt(dx * dx + dy * dy) : 0.f;
 }
 
+// Pathfinding radius with the "size percent" setting applied (100 = the object's own size).
+inline float PathRadius(HeaderObject* ho, int percent)
+{
+	return RadiusOfHeader(ho) * (float)(std::max)(percent, 1) / 100.f;
+}
+
 // The largest circle around the hotspot that fits inside the object's image: the default personal space.
 inline float InscribedRadius(HeaderObject* ho)
 {

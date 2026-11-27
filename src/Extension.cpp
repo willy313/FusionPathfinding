@@ -18,6 +18,11 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	objCExtPtr(objCExtPtr), Runtime(this, objCExtPtr), FusionDebugger(this)
 #endif
 {
+	// Crash and error logging first, so even a problem in the rest of the set-up is recorded
+	FlowLog::Logger::Get().InstallCrashHandlers();
+	FlowLog::Logger::Get().BeginSession("Flow Field Pathfinding started");
+	FlowLog::Mark(FlowLog::C_Construct);
+
 	LinkAction(0, CreateGrid);
 	LinkAction(1, CreateGridFitFrame);
 	LinkAction(2, ClearObstacles);
@@ -34,8 +39,15 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkAction(13, StopObjectsAvoidingEachOther);
 	LinkAction(14, DebugSaveGridImage);
 	LinkAction(15, DebugSaveBoundaryImage);
+	LinkAction(16, RescanFusionObstaclesInArea);
+	LinkAction(17, RescanAllFusionObstacles);
+	LinkAction(18, SetFusionObstaclePrecision);
+	LinkAction(19, SetPathfindingSizePercent);
+	LinkAction(20, SetLogFile);
 
 	LinkCondition(0, PositionIsBlocked);
+	LinkCondition(1, PathBetweenObjectsIsClear);
+	LinkCondition(2, PathBetweenPositionsIsClear);
 
 	LinkExpression(0, Direction);
 	LinkExpression(1, DirectionAt);
@@ -49,6 +61,8 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkExpression(9, CellSize);
 	LinkExpression(10, BlockedCells);
 	LinkExpression(11, CachedTargets);
+	LinkExpression(12, LastError);
+	LinkExpression(13, LogPath);
 
 	// Properties set in the Fusion editor
 	const int cell = (std::max)(2, (int)edPtr->Props.GetPropertyNum("Cell size (pixels)"sv));
@@ -66,16 +80,21 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	if (gh <= 0) gh = 64;
 #endif
 	sys.ResizeGrid(gw, gh, (float)cell, 0.f, 0.f);
+	FlowLog::Info("grid %d x %d cells of %d px; limit %zu cells per frame; import Fusion obstacles on start: %s", gw, gh, cell, sys.cellsPerFrame, pendingStartImport ? "yes" : "no");
 }
 
 Extension::~Extension()
 {
-
+	FlowLog::Mark(FlowLog::C_Destruct);
+	FlowLog::Info("extension destroyed");
+	FlowLog::Logger::Get().RemoveCrashHandlers();
 }
 
 // Runs every tick of Fusion's runtime
 REFLAG Extension::Handle()
 {
+	FlowLog::Mark(FlowLog::C_Handle);
+	FP_TRY
 	if (pendingStartImport)
 	{
 		pendingStartImport = false;
@@ -86,7 +105,15 @@ REFLAG Extension::Handle()
 		RefreshAgents();
 	// Ages the field cache and continues any unfinished builds within the per-frame budget
 	sys.Update();
+
+	// What a crash report should say about the current state
+	FlowLog::Snapshot snap;
+	snap.gridW = sys.grid.width; snap.gridH = sys.grid.height; snap.cell = sys.grid.cellSize;
+	snap.fields = (int)sys.fields.size(); snap.agents = (int)sys.crowd.agents.size(); snap.groups = (int)avoidGroups.size();
+	snap.obstacleObjects = (int)objectObstacles.size(); snap.areas = (int)sys.grid.zones.size();
+	FlowLog::Logger::Get().SetSnapshot(snap);
 	return REFLAG::NONE;
+	FP_CATCH("Handle", REFLAG::NONE)
 }
 
 #if PAUSABLE_EXTENSION

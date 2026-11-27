@@ -163,6 +163,17 @@ namespace FlowPath
 			std::uint8_t& c = imported[Index(cx, cy)];
 			if (!c) { c = 1; dirty = true; }
 		}
+		// Forgets the imported Fusion obstacles in these cells (objects added as obstacles stay), ready for a rescan.
+		void ClearImported(const CellRect& r)
+		{
+			if (!r.Valid()) return;
+			for (int cy = r.cy0; cy <= r.cy1; ++cy)
+				for (int cx = r.cx0; cx <= r.cx1; ++cx)
+				{
+					std::uint8_t& c = imported[Index(cx, cy)];
+					if (c) { c = 0; dirty = true; }
+				}
+		}
 		void ClearAll()
 		{
 			std::fill(counts.begin(), counts.end(), (std::uint16_t)0);
@@ -493,6 +504,11 @@ namespace FlowPath
 		float distance = Inf; // approximate path cost in pixels (a little above the true distance near walls); Inf if unreachable
 		bool reachable = false;
 		bool atTarget = false;
+		// The target spot itself is not usable for this mover (it stands in a wall, or somewhere too narrow for this size),
+		// so the path only leads to the nearest usable spot. The mover still gets a direction towards it.
+		bool targetBlocked = false;
+		// A genuinely clear path: it exists and it leads to the target itself.
+		bool Clear() const { return reachable && !targetBlocked; }
 	};
 
 	// Nearest free, reachable cell to (cx,cy) within a search radius that scales with the mover's radius.
@@ -582,6 +598,7 @@ namespace FlowPath
 		}
 
 		s.reachable = true;
+		s.targetBlocked = f.startCX != f.targetCX || f.startCY != f.targetCY;
 		s.distance = (dw > 0.f ? dsum / dw : 0.f) * g.cellSize;
 		if (outside)
 		{
@@ -762,6 +779,18 @@ namespace FlowPath
 		vx += nx * 0.2f * w; vy += ny * 0.2f * w;                          // and lean slightly away from it
 		const float len = std::sqrt(vx * vx + vy * vy);
 		if (len > 1e-6f) s.vec = { vx / len, vy / len };
+	}
+
+	// A mover with no path at all still shouldn't pile up on top of its neighbours: if they are pushing it hard enough,
+	// steer it apart from them. Returns true if it did.
+	inline bool SeparateWithoutPath(Sample& s, Vec2 push, float gain = 3.f)
+	{
+		const float pl = std::sqrt(push.x * push.x + push.y * push.y);
+		if (s.reachable || pl * gain < 0.3f) return false;
+		s.vec = { push.x / pl, push.y / pl };
+		s.reachable = true;
+		s.targetBlocked = true; // not a clear path: it only gets the direction away from its neighbours
+		return true;
 	}
 
 	// Crowd avoidance as the extension applies it: blend the push away from neighbours into the path direction,
