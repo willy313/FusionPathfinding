@@ -650,7 +650,7 @@ namespace FlowPath
 	// ---- Crowd avoidance ---------------------------------------------------------------------------------------
 	// A mover that takes part in crowd avoidance. Positions are hotspot positions and r is its personal space: a circle
 	// around the hotspot (not around the whole body), so bodies may overlap a little before they push each other.
-	struct Agent { int id = 0; float x = 0.f, y = 0.f, r = 0.f; };
+	struct Agent { int id = 0; float x = 0.f, y = 0.f, r = 0.f, pathR = 0.f; }; // pathR: the radius pathfinding uses for this object
 
 	// All agents of this tick in a spatial hash, so "who is near me?" costs a handful of lookups.
 	class Crowd
@@ -665,6 +665,7 @@ namespace FlowPath
 		{
 			if (!std::isfinite(a.x) || !std::isfinite(a.y) || !std::isfinite(a.r)) return;
 			a.r = (std::min)((std::max)(a.r, 0.5f), 2048.f);
+			a.pathR = std::isfinite(a.pathR) ? (std::min)((std::max)(a.pathR, 0.f), 2048.f) : 0.f;
 			agents.push_back(a);
 		}
 		// Call once after adding this tick's agents.
@@ -720,6 +721,39 @@ namespace FlowPath
 					}
 				}
 			return push;
+		}
+
+		// Which agents count as having reached a destination: the ones in `core` (e.g. within a set distance of it), and
+		// every agent whose personal-space circle touches a chain of agents that leads to one of those. A crowd that
+		// cannot get any closer clumps up around the target, and the whole clump has arrived. `core` has one entry per
+		// agent (same order as `agents`). Call after Rebuild().
+		std::vector<char> ReachedByClump(const std::vector<char>& core, float slack = 1.15f) const
+		{
+			std::vector<char> reached(core);
+			reached.resize(agents.size(), 0);
+			std::vector<size_t> queue;
+			for (size_t i = 0; i < reached.size(); ++i) if (reached[i]) queue.push_back(i);
+			for (size_t head = 0; head < queue.size(); ++head)
+			{
+				const Agent& a = agents[queue[head]];
+				const float reach = (a.r + maxExtent) * slack;
+				const int rings = (std::min)(8, (int)std::ceil(reach / bucketSize));
+				const int bx = BX(a.x), by = BX(a.y);
+				for (int j = -rings; j <= rings; ++j)
+					for (int i = -rings; i <= rings; ++i)
+					{
+						auto it = buckets.find(Key(bx + i, by + j));
+						if (it == buckets.end()) continue;
+						for (size_t k : it->second)
+						{
+							if (reached[k]) continue;
+							const Agent& o = agents[k];
+							const float dx = a.x - o.x, dy = a.y - o.y;
+							if (std::sqrt(dx * dx + dy * dy) <= (a.r + o.r) * slack) { reached[k] = 1; queue.push_back(k); }
+						}
+					}
+			}
+			return reached;
 		}
 
 	private:

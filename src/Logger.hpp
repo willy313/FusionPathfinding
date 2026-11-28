@@ -29,8 +29,8 @@ namespace FlowLog
 		C_CreateGrid, C_CreateGridFit, C_ClearObstacles, C_AddFusion, C_AddFusionLayer, C_AddObjects, C_RemoveObjects,
 		C_SetBudget, C_AddAvoid, C_AddAvoidPos, C_RemoveAvoid, C_ClearAvoid, C_MakeAvoid, C_StopAvoid,
 		C_DebugGrid, C_DebugBoundary, C_RescanArea, C_RescanAll, C_SetPrecision, C_SetSizePercent, C_SetLogPath,
-		C_CondBlocked, C_CondPathObjects, C_CondPathPositions,
-		C_Direction, C_DirectionAt, C_PathDistance, C_PathDistanceAt, C_HasPath, C_HasPathAt, C_IsBlocked, C_GridInfo, C_Text,
+		C_CondBlocked, C_CondPathObjects, C_CondPathPositions, C_CondReached,
+		C_Direction, C_DirectionAt, C_PathDistance, C_PathDistanceAt, C_HasPath, C_HasPathAt, C_IsBlocked, C_GridInfo, C_Text, C_HasReached,
 		C_Handle, C_RefreshAgents, C_Construct, C_Destruct,
 		C_Count
 	};
@@ -39,8 +39,8 @@ namespace FlowLog
 		"Action CreateGrid", "Action CreateGridFitFrame", "Action ClearObstacles", "Action AddFusionObstacles", "Action AddFusionObstaclesAtLayer", "Action AddObjectsAsObstacles", "Action RemoveObjectsAsObstacles",
 		"Action SetCellsPerFrame", "Action AddObjectsToAvoid", "Action AddPositionToAvoid", "Action RemoveObjectsToAvoid", "Action ClearAreasToAvoid", "Action MakeObjectsAvoidEachOther", "Action StopObjectsAvoidingEachOther",
 		"Action DebugSaveGridImage", "Action DebugSaveBoundaryImage", "Action RescanFusionObstaclesInArea", "Action RescanAllFusionObstacles", "Action SetFusionObstaclePrecision", "Action SetPathfindingSizePercent", "Action SetLogFile",
-		"Condition PositionIsBlocked", "Condition PathBetweenObjectsIsClear", "Condition PathBetweenPositionsIsClear",
-		"Expression Direction", "Expression DirectionAt", "Expression PathDistance", "Expression PathDistanceAt", "Expression HasPath", "Expression HasPathAt", "Expression IsBlocked", "Expression grid information", "Expression text",
+		"Condition PositionIsBlocked", "Condition PathBetweenObjectsIsClear", "Condition PathBetweenPositionsIsClear", "Condition ObjectReachedDestination",
+		"Expression Direction", "Expression DirectionAt", "Expression PathDistance", "Expression PathDistanceAt", "Expression HasPath", "Expression HasPathAt", "Expression IsBlocked", "Expression grid information", "Expression text", "Expression HasReached",
 		"Handle (per-frame update)", "RefreshAgents", "Extension created", "Extension destroyed"
 	};
 

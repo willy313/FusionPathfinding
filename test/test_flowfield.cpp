@@ -473,6 +473,49 @@ int main()
 		Sample hasPath; hasPath.reachable = true;
 		CHECK(!SeparateWithoutPath(hasPath, hard), "movers that have a path are left to the normal crowd blending");
 	}
+	// 28) A crowd that clumps up around its destination has arrived as a whole.
+	{
+		System s; s.ResizeGrid(60, 40, 16.f, 0, 0);
+		const int N = 30; const float tx = C(40), ty = C(25), pr = 14.f, reach = 24.f;
+		struct U { float x, y; }; std::vector<U> u;
+		for (int i = 0; i < N; ++i) u.push_back({ C(3) + (float)(i % 6) * 12.f, C(10) + (float)(i / 6) * 12.f });
+		auto fill = [&](const std::vector<U>& pos, const std::vector<std::pair<float, float>>& extra) {
+			s.crowd.Clear();
+			int id = 1; for (auto& p : pos) { Agent a; a.id = id++; a.x = p.x; a.y = p.y; a.r = pr; a.pathR = 8.f; s.crowd.Add(a); }
+			for (auto& p : extra) { Agent a; a.id = id++; a.x = p.first; a.y = p.second; a.r = pr; a.pathR = 8.f; s.crowd.Add(a); }
+			s.crowd.Rebuild();
+		};
+		for (int step = 0; step < 1500; ++step)
+		{
+			fill(u, {});
+			for (int i = 0; i < N; ++i)
+			{
+				Sample sm = s.Query(u[i].x, u[i].y, tx, ty, 8.f);
+				ApplyCrowd(s.grid, 8.f, u[i].x, u[i].y, sm, s.crowd.Separation(*s.crowd.Find(i + 1)));
+				u[i].x += sm.vec.x * 2.f; u[i].y += sm.vec.y * 2.f;
+			}
+		}
+		// two outsiders: one far away on its own, one a little way outside the clump but not touching it
+		float farthest = 0.f; for (auto& p : u) farthest = (std::max)(farthest, std::sqrt((p.x - tx) * (p.x - tx) + (p.y - ty) * (p.y - ty)));
+		const std::pair<float, float> lone{ C(5), C(5) }, nearby{ tx + farthest + 3.f * pr, ty };
+		fill(u, { lone, nearby });
+		std::vector<char> core(s.crowd.agents.size(), 0); int inCore = 0;
+		for (size_t i = 0; i < core.size(); ++i)
+		{
+			const Agent& a = s.crowd.agents[i]; Sample q = s.Query(a.x, a.y, tx, ty, a.pathR);
+			core[i] = q.reachable && q.distance <= reach; inCore += core[i];
+		}
+		std::vector<char> reached = s.crowd.ReachedByClump(core);
+		int clumped = 0; for (int i = 0; i < N; ++i) clumped += reached[i];
+		printf("      %d units gathered: %d are within %.0f px of the target, %d count as having arrived (farthest clump member %.0f px away)\n", N, inCore, reach, clumped, farthest);
+		CHECK(inCore < N, "(the crowd really did spread out: not everybody is within the distance)");
+		CHECK(clumped == N, "the whole clump counts as having reached the destination");
+		CHECK(!reached[N] && !reached[N + 1], "a lone unit far away and one near but not touching the clump have not arrived");
+		fill(u, {});
+		std::vector<char> none(s.crowd.agents.size(), 0);
+		const std::vector<char> nobody = s.crowd.ReachedByClump(none);
+		CHECK(std::count(nobody.begin(), nobody.end(), (char)1) == 0, "without anybody at the destination nobody has arrived");
+	}
 	// 15) Performance: 512x512 grid, many movers asking for the same target.
 	{
 		System s; s.ResizeGrid(512, 512, 8.f, 0, 0);

@@ -9,20 +9,31 @@ bool Extension::PositionIsBlocked(int x, int y)
 	FP_CATCH("PositionIsBlocked", false)
 }
 
-// True if every selected instance of the object has a clear path to the target: a path exists and it leads to the
-// target itself, not just to the nearest spot the object can reach. The target is given by its Fixed value, so it
-// can be any specific object. Each instance is judged with its own size. The picked objects are left as they are;
-// to treat enemies one by one use a "For each object" loop, or an expression such as
-// HasPath(Fixed("Enemy"), Fixed("Player")) inside an action, which is evaluated per instance.
-// (An Object parameter reaches a condition as an object-list number, not as an object.)
-bool Extension::PathBetweenObjectsIsClear(int objectListA, int fixedB)
+#ifdef _WIN32
+// The first selected instance of an object (an object parameter reaches a condition as an object-list number).
+static HeaderObject* FirstSelected(RunHeader* rh, int objectList)
 {
-	FlowLog::Mark(FlowLog::C_CondPathObjects, objectListA, fixedB);
+	for (auto p : DarkEdif::ObjectIterator(rh, (short)objectList, DarkEdif::Selection::Implicit))
+		if (p && p->get_rHo())
+			return p->get_rHo();
+	return nullptr;
+}
+#endif
+
+// True if every selected instance of the first object has a clear path to the second object (its first selected
+// instance): a path exists and it leads to the target itself, not just to the nearest spot the object can reach.
+// Each instance is judged with its own size. The picked objects are left as they are; to treat enemies one by one use
+// a "For each object" loop, or an expression such as HasPath(Fixed("Enemy"), Fixed("Player")) inside an action, which
+// is evaluated per instance.
+bool Extension::PathBetweenObjectsIsClear(int objectListA, int objectListB)
+{
+	FlowLog::Mark(FlowLog::C_CondPathObjects, objectListA, objectListB);
 	FP_TRY
 #ifdef _WIN32
-	float bx, by, br;
-	if (!Resolve(fixedB, bx, by, br))
+	HeaderObject* const target = FirstSelected(rhPtr, objectListB);
+	if (!target)
 		return false;
+	const float bx = (float)target->get_X(), by = (float)target->get_Y();
 
 	bool any = false;
 	for (auto pA : DarkEdif::ObjectIterator(rhPtr, (short)objectListA, DarkEdif::Selection::Implicit))
@@ -36,10 +47,41 @@ bool Extension::PathBetweenObjectsIsClear(int objectListA, int fixedB)
 	}
 	return any;
 #else
-	(void)objectListA; (void)fixedB;
+	(void)objectListA; (void)objectListB;
 	return false;
 #endif
 	FP_CATCH("PathBetweenObjectsIsClear", false)
+}
+
+// True if every selected instance of the first object has reached the second object: it is within `distance` pixels of
+// it by path, or it belongs to a crowd clump that has formed around it (see Expressions.cpp, ReachedSet).
+bool Extension::ObjectReachedDestination(int objectListA, int objectListB, int distance)
+{
+	FlowLog::Mark(FlowLog::C_CondReached, objectListA, objectListB, (float)distance);
+	FP_TRY
+#ifdef _WIN32
+	HeaderObject* const target = FirstSelected(rhPtr, objectListB);
+	if (!target)
+		return false;
+	const float bx = (float)target->get_X(), by = (float)target->get_Y();
+	const int fixedB = target->GetFixedValue();
+
+	bool any = false;
+	for (auto pA : DarkEdif::ObjectIterator(rhPtr, (short)objectListA, DarkEdif::Selection::Implicit))
+	{
+		HeaderObject* const ho = pA ? pA->get_rHo() : nullptr;
+		if (!ho)
+			continue;
+		any = true;
+		if (!ReachedDestination(ho->GetFixedValue(), (float)ho->get_X(), (float)ho->get_Y(), PathRadius(ho, sizePercent), fixedB, bx, by, distance))
+			return false;
+	}
+	return any;
+#else
+	(void)objectListA; (void)objectListB; (void)distance;
+	return false;
+#endif
+	FP_CATCH("ObjectReachedDestination", false)
 }
 
 bool Extension::PathBetweenPositionsIsClear(int ax, int ay, int bx, int by, int radius)

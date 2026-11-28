@@ -55,10 +55,60 @@ void Extension::RefreshAgents()
 			a.x = (float)ho->get_X();
 			a.y = (float)ho->get_Y();
 			a.r = g.radius > 0.f ? g.radius : InscribedRadius(ho); // personal space around the hotspot
+			a.pathR = PathRadius(ho, sizePercent);                 // what pathfinding uses for this object
 			sys.crowd.Add(a); // Crowd ignores unusable values (not finite, absurd sizes)
 		}
 #endif
 	sys.crowd.Rebuild();
+}
+
+// ---- Reaching the destination ----------------------------------------------------------------------------------
+// A crowd can never all stand on the target: it clumps up around it. So "reached" means: within `distance` pixels of
+// the target by path, or touching (with the personal-space circle) a chain of crowd members that leads to one that
+// is. The answer for the whole crowd is worked out once per tick and target.
+const std::vector<char>& Extension::ReachedSet(int fixedB, float bx, float by, int distance)
+{
+	const std::size_t count = sys.crowd.agents.size();
+	if (reachCache.tick != sys.tick || reachCache.fixedB != fixedB || reachCache.distance != distance || reachCache.agents != count)
+	{
+		std::vector<char> core(count, 0);
+		for (std::size_t i = 0; i < count; ++i)
+		{
+			const FlowPath::Agent& a = sys.crowd.agents[i];
+			const FlowPath::Sample s = sys.Query(a.x, a.y, bx, by, a.pathR);
+			core[i] = (s.reachable && s.distance <= (float)distance) ? 1 : 0;
+		}
+		reachCache.reached = sys.crowd.ReachedByClump(core);
+		reachCache.tick = sys.tick; reachCache.fixedB = fixedB; reachCache.distance = distance; reachCache.agents = count;
+	}
+	return reachCache.reached;
+}
+
+bool Extension::ReachedDestination(int fixedA, float ax, float ay, float aRadius, int fixedB, float bx, float by, int distance)
+{
+	distance = (std::max)(distance, 0);
+	if (const FlowPath::Agent* self = sys.crowd.Find(fixedA))
+	{
+		const std::vector<char>& set = ReachedSet(fixedB, bx, by, distance);
+		const std::size_t idx = (std::size_t)(self - sys.crowd.agents.data());
+		if (idx < set.size())
+			return set[idx] != 0;
+	}
+	// Not part of a crowd: judged on its own
+	const FlowPath::Sample s = sys.Query(ax, ay, bx, by, aRadius);
+	return s.reachable && s.distance <= (float)distance;
+}
+
+// 1 if the object has reached its destination (see above), otherwise 0. Evaluated per instance inside an action.
+int Extension::HasReached(int fixedA, int fixedB, int distance)
+{
+	FlowLog::Mark(FlowLog::C_HasReached, fixedA, fixedB, (float)distance);
+	FP_TRY
+	float ax, ay, ar, bx, by, br;
+	if (!Resolve(fixedA, ax, ay, ar) || !Resolve(fixedB, bx, by, br))
+		return 0;
+	return ReachedDestination(fixedA, ax, ay, ar, fixedB, bx, by, distance) ? 1 : 0;
+	FP_CATCH("HasReached", 0)
 }
 
 // ---- Direction -------------------------------------------------------------------------------------------------

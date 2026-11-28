@@ -131,6 +131,10 @@
 			[
 				2,
 				"Path between positions is clear"
+			],
+			[
+				3,
+				"Object has reached its destination"
 			]
 		],
 		"ExpressionMenu": [
@@ -162,6 +166,10 @@
 				[
 					5,
 					"Is the path between positions clear?"
+				],
+				[
+					14,
+					"Has the object reached its destination?"
 				]
 			],
 			[
@@ -217,15 +225,15 @@
 					],
 					[
 						"Integer",
-						"Cell size in pixels (smaller = more precise but slower to calculate; 16 is a good start)"
+						"Cell size in pixels (smaller = more precise, slower)"
 					],
 					[
 						"Integer",
-						"X of the grid's top-left corner in the frame (usually 0)"
+						"X of the grid's top-left corner (usually 0)"
 					],
 					[
 						"Integer",
-						"Y of the grid's top-left corner in the frame (usually 0)"
+						"Y of the grid's top-left corner (usually 0)"
 					]
 				]
 			},
@@ -234,7 +242,7 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Cell size in pixels (smaller = more precise but slower to calculate; 16 is a good start)"
+						"Cell size in pixels (smaller = more precise, slower)"
 					]
 				]
 			},
@@ -258,7 +266,7 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects to turn into obstacles. Their current position and size are used; add them again after they move"
+						"Objects to turn into obstacles (add again after they move)"
 					]
 				]
 			},
@@ -267,7 +275,7 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects to remove (only objects that were added with Add as obstacles)"
+						"Objects to remove from the obstacles"
 					]
 				]
 			},
@@ -276,7 +284,7 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Maximum cells processed per frame; 0 = no limit. Raise it if the game stutters when targets move"
+						"Cells per frame (0 = no limit)"
 					]
 				]
 			},
@@ -285,11 +293,11 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects to avoid. Their area is avoided when there is a way round it, and crossed when there is not. Add them again after they move"
+						"Objects to avoid (add again after they move)"
 					],
 					[
 						"Integer",
-						"Padding in pixels: how far around the area units start avoiding it"
+						"Padding in pixels around the area to avoid"
 					]
 				]
 			},
@@ -306,7 +314,7 @@
 					],
 					[
 						"Integer",
-						"Padding in pixels: radius of the area to avoid"
+						"Radius of the area to avoid in pixels"
 					]
 				]
 			},
@@ -315,7 +323,7 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects to stop avoiding (added with Add as areas to avoid)"
+						"Objects to stop avoiding"
 					]
 				]
 			},
@@ -327,11 +335,11 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects that avoid each other. All their instances are included automatically, also ones created later"
+						"Objects that keep their distance from each other"
 					],
 					[
 						"Integer",
-						"Personal space radius in pixels, measured from the object's centre (0 = the largest circle that fits inside the object). Objects may overlap a little before pushing each other apart"
+						"Personal space radius in pixels (0 = automatic)"
 					]
 				]
 			},
@@ -343,7 +351,7 @@
 				"Parameters": [
 					[
 						"Text",
-						"File name or path of the PNG image to write, e.g. grid.png"
+						"PNG file name, e.g. grid.png"
 					]
 				]
 			},
@@ -352,11 +360,11 @@
 				"Parameters": [
 					[
 						"Object",
-						"Objects whose boundary to show (their pathfinding size is used; a circle is drawn around each one)"
+						"Objects whose boundary to show"
 					],
 					[
 						"Text",
-						"File name or path of the PNG image to write, e.g. boundary.png"
+						"PNG file name, e.g. boundary.png"
 					]
 				]
 			},
@@ -365,11 +373,11 @@
 				"Parameters": [
 					[
 						"Integer",
-						"X of the area's top-left corner in pixels"
+						"X of the area's top-left corner"
 					],
 					[
 						"Integer",
-						"Y of the area's top-left corner in pixels"
+						"Y of the area's top-left corner"
 					],
 					[
 						"Integer",
@@ -381,7 +389,7 @@
 					],
 					[
 						"Integer",
-						"Layer (-1 for all layers)"
+						"Layer (-1 = all layers)"
 					]
 				]
 			},
@@ -389,11 +397,11 @@
 				"Title": "Rescan all Fusion obstacles"
 			},
 			{
-				"Title": "Set Fusion obstacle precision to %0",
+				"Title": "Set Fusion obstacle precision to %0 (0 = cautious, 1 = balanced)",
 				"Parameters": [
 					[
 						"Integer",
-						"0 = cautious: a cell is blocked if any part of it touches an obstacle (narrows corridors). 1 = balanced: only the central half of the cell counts (keeps corridors closer to their real width)"
+						"Precision (0 = cautious, 1 = balanced)"
 					]
 				]
 			},
@@ -402,7 +410,7 @@
 				"Parameters": [
 					[
 						"Integer",
-						"Percent of the object's own size (100 = its own size). Lower it if corridors close although objects visibly fit; raise it to keep them further from walls"
+						"Percent of the object's own size (100 = own size)"
 					]
 				]
 			},
@@ -411,7 +419,7 @@
 				"Parameters": [
 					[
 						"Text",
-						"File name or path of the log file, e.g. pathfinding.log"
+						"File name or path of the log file"
 					]
 				]
 			}
@@ -437,11 +445,11 @@
 				"Parameters": [
 					[
 						"Object",
-						"Object(s) that want to reach the target. Each one is judged with its own size, and all of them need a clear path"
+						"Objects that want to reach the target"
 					],
 					[
-						"Integer",
-						"Fixed value of the target object, e.g. Fixed(\"Player\")"
+						"Object",
+						"The target object"
 					]
 				]
 			},
@@ -468,6 +476,24 @@
 					[
 						"Integer",
 						"Radius of the moving object in pixels"
+					]
+				]
+			},
+			{
+				"Title": "%o : %0 has reached %1 (within %2 px)",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Object",
+						"Objects heading for the target"
+					],
+					[
+						"Object",
+						"The target object"
+					],
+					[
+						"Integer",
+						"Distance in pixels that counts as reached"
 					]
 				]
 			}
@@ -642,6 +668,24 @@
 			{
 				"Title": "LogPath$(",
 				"Returns": "Text"
+			},
+			{
+				"Title": "HasReached(",
+				"Returns": "Integer",
+				"Parameters": [
+					[
+						"Integer",
+						"Fixed value of the object that wants to move"
+					],
+					[
+						"Integer",
+						"Fixed value of the object to move toward"
+					],
+					[
+						"Integer",
+						"Distance in pixels that counts as reached"
+					]
+				]
 			}
 		],
 		"Properties": [

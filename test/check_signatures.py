@@ -50,6 +50,14 @@ for kind, key, menukey in (('Action', 'Actions', 'ActionMenu'), ('Condition', 'C
         else:
             if not item['Title'].endswith('('): errors.append(f'Expression {i}: title must end with "("')
 
+# LENGTH: Fusion shows a parameter prompt as the title of its dialog. A very long one came out blank, so keep them short.
+MAX_PROMPT, MAX_TITLE = 70, 90
+for kind in ('Actions', 'Conditions', 'Expressions'):
+    for i, item in enumerate(j[kind]):
+        if len(item['Title']) > MAX_TITLE: errors.append(f'{kind} {i}: title is {len(item["Title"])} characters (max {MAX_TITLE}): {item["Title"]}')
+        for k, prm in enumerate(item.get('Parameters', [])):
+            if len(prm[1]) > MAX_PROMPT: errors.append(f'{kind} {i} parameter {k}: prompt is {len(prm[1])} characters (max {MAX_PROMPT}): {prm[1]}')
+
 # Properties named in C++ must exist in the JSON
 titles = {p['Title'] for p in j['Properties']}
 for name in re.findall(r'(?:GetPropertyNum|IsPropChecked|GetPropertyStr)\("([^"]+)"sv\)', cpp):

@@ -65,6 +65,11 @@ public:
 	void ImportFusionObstacles(int layer);
 	void ImportCells(int layer, const FlowPath::CellRect& cells, bool clearFirst);
 	void ApplyObjectZones(bool add, int padding);
+	// "Has this object reached its destination?" Crowd-wide answer for one target and distance, kept for the tick.
+	struct ReachCache { std::uint64_t tick = ~0ull; int fixedB = 0; int distance = -1; std::size_t agents = 0; std::vector<char> reached; };
+	ReachCache reachCache;
+	const std::vector<char>& ReachedSet(int fixedB, float bx, float by, int distance);
+	bool ReachedDestination(int fixedA, float ax, float ay, float aRadius, int fixedB, float bx, float by, int distance);
 	void RefreshAgents(); // rebuilds the crowd from the current positions of all avoiding objects
 
 	// Actions
@@ -92,7 +97,8 @@ public:
 
 	// Conditions
 	bool PositionIsBlocked(int x, int y);
-	bool PathBetweenObjectsIsClear(int objectListA, int fixedB);
+	bool PathBetweenObjectsIsClear(int objectListA, int objectListB);
+	bool ObjectReachedDestination(int objectListA, int objectListB, int distance);
 	bool PathBetweenPositionsIsClear(int ax, int ay, int bx, int by, int radius);
 
 	// Expressions
@@ -108,6 +114,7 @@ public:
 	int CellSize();
 	int BlockedCells();
 	int CachedTargets();
+	int HasReached(int fixedA, int fixedB, int distance);
 	const TCHAR* LastError();
 	const TCHAR* LogPath();
 

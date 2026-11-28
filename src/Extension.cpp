@@ -48,6 +48,7 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkCondition(0, PositionIsBlocked);
 	LinkCondition(1, PathBetweenObjectsIsClear);
 	LinkCondition(2, PathBetweenPositionsIsClear);
+	LinkCondition(3, ObjectReachedDestination);
 
 	LinkExpression(0, Direction);
 	LinkExpression(1, DirectionAt);
@@ -63,6 +64,7 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkExpression(11, CachedTargets);
 	LinkExpression(12, LastError);
 	LinkExpression(13, LogPath);
+	LinkExpression(14, HasReached);
 
 	// Properties set in the Fusion editor
 	const int cell = (std::max)(2, (int)edPtr->Props.GetPropertyNum("Cell size (pixels)"sv));
