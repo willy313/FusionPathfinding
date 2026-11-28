@@ -126,7 +126,7 @@
 			],
 			[
 				1,
-				"Path between objects is clear"
+				"All objects have a clear path"
 			],
 			[
 				2,
@@ -134,7 +134,15 @@
 			],
 			[
 				3,
-				"Object has reached its destination"
+				"All objects have reached their destination"
+			],
+			[
+				4,
+				"At least one object has reached its destination"
+			],
+			[
+				5,
+				"At least one object has a clear path"
 			]
 		],
 		"ExpressionMenu": [
@@ -440,7 +448,7 @@
 				]
 			},
 			{
-				"Title": "%o : Path from %0 to %1 is clear",
+				"Title": "%o : All of %0 have a clear path to %1",
 				"Triggered": false,
 				"Parameters": [
 					[
@@ -480,7 +488,7 @@
 				]
 			},
 			{
-				"Title": "%o : %0 has reached %1 (within %2 px)",
+				"Title": "%o : All of %0 have reached %1 (within %2 px)",
 				"Triggered": false,
 				"Parameters": [
 					[
@@ -494,6 +502,38 @@
 					[
 						"Integer",
 						"Distance in pixels that counts as reached"
+					]
+				]
+			},
+			{
+				"Title": "%o : At least one of %0 has reached %1 (within %2 px)",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Object",
+						"Objects heading for the target"
+					],
+					[
+						"Object",
+						"The target object"
+					],
+					[
+						"Integer",
+						"Distance in pixels that counts as reached"
+					]
+				]
+			},
+			{
+				"Title": "%o : At least one of %0 has a clear path to %1",
+				"Triggered": false,
+				"Parameters": [
+					[
+						"Object",
+						"Objects that want to reach the target"
+					],
+					[
+						"Object",
+						"The target object"
 					]
 				]
 			}

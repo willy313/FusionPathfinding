@@ -95,4 +95,28 @@ int main()
 		}
 		printf("  %2d enemies with %2d different targets: %.3f ms per frame [%g]\n", n, n, Ms(t0, Clock::now()) / frames, acc);
 	}
+
+	printf("== G. \"Has reached\" for a whole crowd around one target: one Query per unit + clump search, once per tick ==\n");
+	for (int n : { 100, 500, 2000 })
+	{
+		System s; s.ResizeGrid(80, 60, 16.f, 0, 0); Scatter(s, 8, 11);
+		const float tx = 640.f, ty = 480.f; srand(13);
+		// units gathered in a dense blob around the target, like a real crowd
+		for (int i = 0; i < n; ++i)
+		{
+			Agent a; a.id = i + 1; a.r = 12.f; a.pathR = 12.f;
+			float ang = (float)(rand() % 6283) / 1000.f, rad = 14.f * std::sqrt((float)(rand() % 1000) / 1000.f * (float)n * 0.6f);
+			a.x = tx + std::cos(ang) * rad; a.y = ty + std::sin(ang) * rad; s.crowd.Add(a);
+		}
+		s.crowd.Rebuild();
+		const int frames = 50; size_t reachedCount = 0; auto t0 = Clock::now();
+		for (int f = 0; f < frames; ++f)
+		{
+			std::vector<char> core(s.crowd.agents.size(), 0);
+			for (size_t i = 0; i < core.size(); ++i) { const Agent& a = s.crowd.agents[i]; Sample q = s.Query(a.x, a.y, tx, ty, a.pathR); core[i] = q.reachable && q.distance <= 30.f; }
+			std::vector<char> r = s.crowd.ReachedByClump(core);
+			reachedCount = 0; for (char c : r) reachedCount += c;
+		}
+		printf("  %4d units: %.3f ms per tick (%zu of them count as arrived)\n", n, Ms(t0, Clock::now()) / frames, reachedCount);
+	}
 }

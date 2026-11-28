@@ -49,6 +49,8 @@ Extension::Extension(const EDITDATA* const edPtr, void* const objCExtPtr, const 
 	LinkCondition(1, PathBetweenObjectsIsClear);
 	LinkCondition(2, PathBetweenPositionsIsClear);
 	LinkCondition(3, ObjectReachedDestination);
+	LinkCondition(4, AnyObjectReachedDestination);
+	LinkCondition(5, AnyPathBetweenObjectsIsClear);
 
 	LinkExpression(0, Direction);
 	LinkExpression(1, DirectionAt);

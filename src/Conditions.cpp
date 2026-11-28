@@ -20,45 +20,14 @@ static HeaderObject* FirstSelected(RunHeader* rh, int objectList)
 }
 #endif
 
-// True if every selected instance of the first object has a clear path to the second object (its first selected
-// instance): a path exists and it leads to the target itself, not just to the nearest spot the object can reach.
-// Each instance is judged with its own size. The picked objects are left as they are; to treat enemies one by one use
-// a "For each object" loop, or an expression such as HasPath(Fixed("Enemy"), Fixed("Player")) inside an action, which
-// is evaluated per instance.
-bool Extension::PathBetweenObjectsIsClear(int objectListA, int objectListB)
+// The four object conditions share this. For every picked instance of the first object it asks either "has a clear
+// path to the target" (a path exists and leads to the target itself, not just to the nearest spot the object can
+// reach) or, with reachedMode, "has reached its destination" (within `distance` px of the target, or part of a crowd
+// clump that has; see Expressions.cpp, ReachedSet). The target is the first picked instance of the second object.
+// Each instance is judged with its own size. With `any` one instance is enough, otherwise every instance must pass.
+// Stops at the first instance that decides the answer. The picked objects are left as they are.
+bool Extension::EvaluateObjects(int objectListA, int objectListB, int distance, bool reachedMode, bool any)
 {
-	FlowLog::Mark(FlowLog::C_CondPathObjects, objectListA, objectListB);
-	FP_TRY
-#ifdef _WIN32
-	HeaderObject* const target = FirstSelected(rhPtr, objectListB);
-	if (!target)
-		return false;
-	const float bx = (float)target->get_X(), by = (float)target->get_Y();
-
-	bool any = false;
-	for (auto pA : DarkEdif::ObjectIterator(rhPtr, (short)objectListA, DarkEdif::Selection::Implicit))
-	{
-		HeaderObject* const ho = pA ? pA->get_rHo() : nullptr;
-		if (!ho)
-			continue;
-		any = true;
-		if (!sys.Query((float)ho->get_X(), (float)ho->get_Y(), bx, by, PathRadius(ho, sizePercent)).Clear())
-			return false;
-	}
-	return any;
-#else
-	(void)objectListA; (void)objectListB;
-	return false;
-#endif
-	FP_CATCH("PathBetweenObjectsIsClear", false)
-}
-
-// True if every selected instance of the first object has reached the second object: it is within `distance` pixels of
-// it by path, or it belongs to a crowd clump that has formed around it (see Expressions.cpp, ReachedSet).
-bool Extension::ObjectReachedDestination(int objectListA, int objectListB, int distance)
-{
-	FlowLog::Mark(FlowLog::C_CondReached, objectListA, objectListB, (float)distance);
-	FP_TRY
 #ifdef _WIN32
 	HeaderObject* const target = FirstSelected(rhPtr, objectListB);
 	if (!target)
@@ -66,22 +35,61 @@ bool Extension::ObjectReachedDestination(int objectListA, int objectListB, int d
 	const float bx = (float)target->get_X(), by = (float)target->get_Y();
 	const int fixedB = target->GetFixedValue();
 
-	bool any = false;
+	bool seen = false;
 	for (auto pA : DarkEdif::ObjectIterator(rhPtr, (short)objectListA, DarkEdif::Selection::Implicit))
 	{
 		HeaderObject* const ho = pA ? pA->get_rHo() : nullptr;
 		if (!ho)
 			continue;
-		any = true;
-		if (!ReachedDestination(ho->GetFixedValue(), (float)ho->get_X(), (float)ho->get_Y(), PathRadius(ho, sizePercent), fixedB, bx, by, distance))
-			return false;
+		seen = true;
+		const float ax = (float)ho->get_X(), ay = (float)ho->get_Y(), radius = PathRadius(ho, sizePercent);
+		const bool ok = reachedMode ? ReachedDestination(ho->GetFixedValue(), ax, ay, radius, fixedB, bx, by, distance)
+		                            : sys.Query(ax, ay, bx, by, radius).Clear();
+		if (any && ok) return true;   // one is enough
+		if (!any && !ok) return false; // one failure is enough
 	}
-	return any;
+	return seen && !any;              // all passed (and there was at least one), or nobody passed
 #else
-	(void)objectListA; (void)objectListB; (void)distance;
+	(void)objectListA; (void)objectListB; (void)distance; (void)reachedMode; (void)any;
 	return false;
 #endif
+}
+
+// Every picked instance has a clear path to the target. (To react to enemies one by one see the README: store
+// HasPath(...) in an alterable value and use Fusion's own condition on it, which really picks.)
+bool Extension::PathBetweenObjectsIsClear(int objectListA, int objectListB)
+{
+	FlowLog::Mark(FlowLog::C_CondPathObjects, objectListA, objectListB, 0.f);
+	FP_TRY
+	return EvaluateObjects(objectListA, objectListB, 0, false, false);
+	FP_CATCH("PathBetweenObjectsIsClear", false)
+}
+
+// At least one picked instance has a clear path to the target.
+bool Extension::AnyPathBetweenObjectsIsClear(int objectListA, int objectListB)
+{
+	FlowLog::Mark(FlowLog::C_CondPathObjects, objectListA, objectListB, 1.f);
+	FP_TRY
+	return EvaluateObjects(objectListA, objectListB, 0, false, true);
+	FP_CATCH("AnyPathBetweenObjectsIsClear", false)
+}
+
+// Every picked instance has reached the target.
+bool Extension::ObjectReachedDestination(int objectListA, int objectListB, int distance)
+{
+	FlowLog::Mark(FlowLog::C_CondReached, objectListA, objectListB, 0.f);
+	FP_TRY
+	return EvaluateObjects(objectListA, objectListB, distance, true, false);
 	FP_CATCH("ObjectReachedDestination", false)
+}
+
+// At least one picked instance has reached the target.
+bool Extension::AnyObjectReachedDestination(int objectListA, int objectListB, int distance)
+{
+	FlowLog::Mark(FlowLog::C_CondReached, objectListA, objectListB, 1.f);
+	FP_TRY
+	return EvaluateObjects(objectListA, objectListB, distance, true, true);
+	FP_CATCH("AnyObjectReachedDestination", false)
 }
 
 bool Extension::PathBetweenPositionsIsClear(int ax, int ay, int bx, int by, int radius)

@@ -65,6 +65,8 @@ public:
 	void ImportFusionObstacles(int layer);
 	void ImportCells(int layer, const FlowPath::CellRect& cells, bool clearFirst);
 	void ApplyObjectZones(bool add, int padding);
+	// Shared by the four object conditions: reachedMode asks "reached its destination" instead of "clear path"; any asks for at least one instead of all.
+	bool EvaluateObjects(int objectListA, int objectListB, int distance, bool reachedMode, bool any);
 	// "Has this object reached its destination?" Crowd-wide answer for one target and distance, kept for the tick.
 	struct ReachCache { std::uint64_t tick = ~0ull; int fixedB = 0; int distance = -1; std::size_t agents = 0; std::vector<char> reached; };
 	ReachCache reachCache;
@@ -99,6 +101,8 @@ public:
 	bool PositionIsBlocked(int x, int y);
 	bool PathBetweenObjectsIsClear(int objectListA, int objectListB);
 	bool ObjectReachedDestination(int objectListA, int objectListB, int distance);
+	bool AnyPathBetweenObjectsIsClear(int objectListA, int objectListB);
+	bool AnyObjectReachedDestination(int objectListA, int objectListB, int distance);
 	bool PathBetweenPositionsIsClear(int ax, int ay, int bx, int by, int radius);
 
 	// Expressions
